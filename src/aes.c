@@ -8,10 +8,11 @@
  * Inspiration: https://stackoverflow.com/questions/50491807/aes-ni-intrinsics-with-192-and-256-bits-keys
  */
 
-#include "my_aes.h"
+#include "aes.h"
 #include <wmmintrin.h> /* for intrinsics for AES-NI */
 
 /* Aggressive inline macro for low-cost wrappers */
+#ifndef(INLINE)
 #if defined(_MSC_VER)
     // Microsoft Visual C++
     #define INLINE __forceinline
@@ -21,6 +22,7 @@
 #else
     // Fallback for other compilers
     #define INLINE inline
+#endif
 #endif
 
 /* --- Key schedule generators --- (writes to provided array) */

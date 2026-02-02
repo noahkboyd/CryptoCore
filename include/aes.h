@@ -15,7 +15,7 @@
 
 /* ----- PUBLIC API -----
  * Guide:
- *   1. Use a key to generate the corresponding schedule (encryption-only or full (both encryption & decryption))
+ *   1. Use a key to generate the corresponding schedule (encryption-only or full (for both encryption & decryption))
  *   2. Use schedules to individual transform plaintext/ciphertext blocks
  */
 
@@ -24,14 +24,14 @@ typedef uint8_t aes128_key_t[16];
 typedef uint8_t aes192_key_t[24];
 typedef uint8_t aes256_key_t[32];
 /* Helper macros to build typed key literals (16, 24, 32 bytes) */
-#define AES128_KEY(...) ((const aes128_key_t){__VA_ARGS__})
-#define AES192_KEY(...) ((const aes192_key_t){__VA_ARGS__})
-#define AES256_KEY(...) ((const aes256_key_t){__VA_ARGS__})
+#define AES128_KEY(...) ((const aes128_key_t){ __VA_ARGS__ })
+#define AES192_KEY(...) ((const aes192_key_t){ __VA_ARGS__ })
+#define AES256_KEY(...) ((const aes256_key_t){ __VA_ARGS__ })
 
 /* --- Full Key schedule types --- (for encryption & decryption) */
-typedef uint8_t aes128_sched_full_t[320]; /* 20 round keys = 176 bytes (128b rnd key=16B) */
-typedef uint8_t aes192_sched_full_t[384]; /* 24 round keys = 208 bytes */
-typedef uint8_t aes256_sched_full_t[448]; /* 28 round keys = 240 bytes */
+typedef uint8_t aes128_sched_full_t[320]; /* 20 round keys = 320 bytes (128b rnd key=16B) */
+typedef uint8_t aes192_sched_full_t[384]; /* 24 round keys = 384 bytes */
+typedef uint8_t aes256_sched_full_t[448]; /* 28 round keys = 448 bytes */
 /* --- Encryption-only schedule types --- */
 typedef uint8_t aes128_sched_enc_t[176];  /* 11 round keys = 176 bytes */
 typedef uint8_t aes192_sched_enc_t[208];  /* 13 round keys = 208 bytes */
