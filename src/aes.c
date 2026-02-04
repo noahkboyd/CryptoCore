@@ -191,101 +191,148 @@ void aes256_load_key(const aes256_key_t key, aes256_sched_full_t schedule) {
 
 /* --- Block transform internal --- */
 
-#define AES_AGNOS_ROUNDS_0_9_AMD64(m, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9, ROUND) \
-    m = _mm_xor_si128   (m, k0); \
-    m = ROUND           (m, k1); \
-    m = ROUND           (m, k2); \
-    m = ROUND           (m, k3); \
-    m = ROUND           (m, k4); \
-    m = ROUND           (m, k5); \
-    m = ROUND           (m, k6); \
-    m = ROUND           (m, k7); \
-    m = ROUND           (m, k8); \
-    m = ROUND           (m, k9);
-#define AES_ENC_ROUNDS_0_9_AMD64(m, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9) \
-    AES_AGNOS_ROUNDS_0_9_AMD64(m, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9, _mm_aesenc_si128)
-#define AES_DEC_ROUNDS_0_9_AMD64(m, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9) \
-    AES_AGNOS_ROUNDS_0_9_AMD64(m, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9, _mm_aesdec_si128)
+/* Agnostic internal shared round operations */
+/* This define concats arg token k with 0-9 for k0-k9 */
+#define AES_AGNOS_ENC_ROUNDS_0_9_AMD64(m, k) \
+    m = _mm_xor_si128   (m, k##0); \
+    m = _mm_aesenc_si128(m, k##1); \
+    m = _mm_aesenc_si128(m, k##2); \
+    m = _mm_aesenc_si128(m, k##3); \
+    m = _mm_aesenc_si128(m, k##4); \
+    m = _mm_aesenc_si128(m, k##5); \
+    m = _mm_aesenc_si128(m, k##6); \
+    m = _mm_aesenc_si128(m, k##7); \
+    m = _mm_aesenc_si128(m, k##8); \
+    m = _mm_aesenc_si128(m, k##9);
+/* This define concats arg token k with i0-i9 (int literals - not macros themselves) for ki0-ki9 */
+#define AES_AGNOS_DEC_ROUNDS_0_9_AMD64(m, k, i0, i1, i2, i3, i4, i5, i6, i7, i7, i8, i9) \
+    m = _mm_xor_si128   (m, k##i0); \
+    m = _mm_aesdec_si128(m, k##i1); \
+    m = _mm_aesdec_si128(m, k##i2); \
+    m = _mm_aesdec_si128(m, k##i3); \
+    m = _mm_aesdec_si128(m, k##i4); \
+    m = _mm_aesdec_si128(m, k##i5); \
+    m = _mm_aesdec_si128(m, k##i6); \
+    m = _mm_aesdec_si128(m, k##i7); \
+    m = _mm_aesdec_si128(m, k##i8); \
+    m = _mm_aesdec_si128(m, k##i9);
 
-
-static INLINE __m128i aes128_do_enc_block_amd64(__m128i m, __m128i k0, __m128i k1, __m128i k2, __m128i k3, __m128i k4, __m128i k5, __m128i k6, __m128i k7, __m128i k8, __m128i k9, __m128i k10) {
-    AES_ENC_ROUNDS_0_9_AMD64(m, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9)
-    return _mm_aesenclast_si128(m, k10);
+/* Main work operations for encryption/decryption -> define for inling */
+/* Expects k0-k10 as existing round keys in scope, m and round keys are __m128i */
+#define AES128_ENC_BLOCK_AMD64(m, k) {   \
+    AES_AGNOS_ENC_ROUNDS_0_9_AMD64(m, k) \
+    m = _mm_aesenclast_si128(m, k##10);  \
+}
+/* Expects k0-k12 as existing round keys in scope, m and round keys are __m128i */
+#define AES192_ENC_BLOCK_AMD64(m, k) {   \
+    AES_AGNOS_ENC_ROUNDS_0_9_AMD64(m, k) \
+    m = _mm_aesenc_si128   (m, k##10);   \
+    m = _mm_aesenc_si128   (m, k##11);   \
+    m= _mm_aesenclast_si128(m, k##12);   \
+}
+/* Expects k0-k14 as existing round keys in scope, m and round keys are __m128i */
+#define AES256_ENC_BLOCK_AMD64(m, k) {   \
+    AES_AGNOS_ENC_ROUNDS_0_9_AMD64(m, k) \
+    m = _mm_aesenc_si128    (m, k##10);  \
+    m = _mm_aesenc_si128    (m, k##11);  \
+    m = _mm_aesenc_si128    (m, k##12);  \
+    m = _mm_aesenc_si128    (m, k##13);  \
+    m = _mm_aesenclast_si128(m, k##14);  \
+}
+/* Expects k0, k10-k19 as existing round keys in scope, m and round keys are __m128i */
+#define AES128_DEC_BLOCK_AMD64(m, k) { \
+    AES_AGNOS_DEC_ROUNDS_0_9_AMD64(m, k, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19) \
+    m = _mm_aesdeclast_si128(m, k##0); \
+}
+/* Expects k0, k12-k23 as existing round keys in scope, m and round keys are __m128i */
+#define AES192_DEC_BLOCK_AMD64(m, k) { \
+    AES_AGNOS_DEC_ROUNDS_0_9_AMD64(m, k, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21) \
+    m = _mm_aesdec_si128    (m, k##22); \
+    m = _mm_aesdec_si128    (m, k##23); \
+    m = _mm_aesdeclast_si128(m, k##0);  \
+}
+/* Expects k0, k14-k27 as existing round keys in scope, m and round keys are __m128i */
+#define AES256_DEC_BLOCK_AMD64(m, k) { \
+    AES_AGNOS_DEC_ROUNDS_0_9_AMD64(m, k, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23) \
+    m = _mm_aesdec_si128    (m, k##24); \
+    m = _mm_aesdec_si128    (m, k##25); \
+    m = _mm_aesdec_si128    (m, k##26); \
+    m = _mm_aesdec_si128    (m, k##27); \
+    m = _mm_aesdeclast_si128(m, k##0);  \
 }
 
-static INLINE __m128i aes192_do_enc_block_amd64(__m128i m, __m128i k0, __m128i k1, __m128i k2, __m128i k3, __m128i k4, __m128i k5, __m128i k6, __m128i k7, __m128i k8, __m128i k9, __m128i k10, __m128i k11, __m128i k12) {
-    AES_ENC_ROUNDS_0_9_AMD64(m, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9)
-    m = _mm_aesenc_si128       (m, k10);
-    m = _mm_aesenc_si128       (m, k11);
-    return _mm_aesenclast_si128(m, k12);
-}
 
-static INLINE __m128i aes256_do_enc_block_amd64(__m128i m, __m128i k0, __m128i k1, __m128i k2, __m128i k3, __m128i k4, __m128i k5, __m128i k6, __m128i k7, __m128i k8, __m128i k9, __m128i k10, __m128i k11, __m128i k12, __m128i k13, __m128i k14) {
-    AES_ENC_ROUNDS_0_9_AMD64(m, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9)
-    m = _mm_aesenc_si128       (m, k10);
-    m = _mm_aesenc_si128       (m, k11);
-    m = _mm_aesenc_si128       (m, k12);
-    m = _mm_aesenc_si128       (m, k13);
-    return _mm_aesenclast_si128(m, k14);
-}
-
-static INLINE __m128i aes128_do_dec_block_amd64(__m128i m, __m128i k0, __m128i k10, __m128i k11, __m128i k12, __m128i k13, __m128i k14, __m128i k15, __m128i k16, __m128i k17, __m128i k18, __m128i k19) {
-    AES_DEC_ROUNDS_0_9_AMD64(m, k10, k11, k12, k13, k14, k15, k16, k17, k18, k19)
-    return _mm_aesdeclast_si128(m, k0);
-}
-
-static INLINE __m128i aes192_do_dec_block_amd64(__m128i m, __m128i k0, __m128i k12, __m128i k13, __m128i k14, __m128i k15, __m128i k16, __m128i k17, __m128i k18, __m128i k19, __m128i k20, __m128i k21, __m128i k22, __m128i k23) {
-    AES_DEC_ROUNDS_0_9_AMD64(m, k12, k13, k14, k15, k16, k17, k18, k19, k20, k21)
-    m = _mm_aesdec_si128       (m, k22);
-    m = _mm_aesdec_si128       (m, k23);
-    return _mm_aesdeclast_si128(m, k0);
-}
-
-static INLINE __m128i aes256_do_dec_block_amd64(__m128i m, __m128i k0, __m128i k14, __m128i k15, __m128i k16, __m128i k17, __m128i k18, __m128i k19, __m128i k20, __m128i k21, __m128i k22, __m128i k23, __m128i k24, __m128i k25, __m128i k26, __m128i k27) {
-    AES_DEC_ROUNDS_0_9_AMD64(m, k14, k15, k16, k17, k18, k19, k20, k21, k22, k23)
-    m = _mm_aesdec_si128       (m, k24);
-    m = _mm_aesdec_si128       (m, k25);
-    m = _mm_aesdec_si128       (m, k26);
-    m = _mm_aesdec_si128       (m, k27);
-    return _mm_aesdeclast_si128(m, k0);
-}
+/* Helper macros for keys */
+#define get_key(k, i, schedule_ptr) __m128i k##i = _mm_loadu_si128(((__m128i *) schedule_ptr) + i)
+#define get_11_keys(k, schedule_ptr, i0, i1, i2, i3, i4, i5, i6, i7, i8, i9, i10) \
+    get_key(k,  i0, schedule_ptr); \
+    get_key(k,  i1, schedule_ptr); \
+    get_key(k,  i2, schedule_ptr); \
+    get_key(k,  i3, schedule_ptr); \
+    get_key(k,  i4, schedule_ptr); \
+    get_key(k,  i5, schedule_ptr); \
+    get_key(k,  i6, schedule_ptr); \
+    get_key(k,  i7, schedule_ptr); \
+    get_key(k,  i8, schedule_ptr); \
+    get_key(k,  i9, schedule_ptr); \
+    get_key(k, i10, schedule_ptr);
+#define get_keys_0_10(k, schedule_ptr) get_11_keys(k, schedule_ptr, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 
 /* --- Encrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
-
-#define S(i) _mm_loadu_si128(((__m128i *) schedule) + i)
 void aes128_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes128_sched_enc_t schedule) {
     __m128i m = _mm_loadu_si128((__m128i *) plaintext);
-    m = aes128_do_enc_block_amd64(m, S(0), S(1), S(2), S(3), S(4), S(5), S(6), S(7), S(8), S(9), S(10));
+    get_keys_0_10(k, schedule)
+    AES128_ENC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) ciphertext, m);
 }
 void aes192_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes192_sched_enc_t schedule) {
     __m128i m = _mm_loadu_si128((__m128i *) plaintext);
-    m = aes192_do_enc_block_amd64(m, S(0), S(1), S(2), S(3), S(4), S(5), S(6), S(7), S(8), S(9), S(10), S(11), S(12));
+    get_keys_0_10(k, schedule)
+    get_key(k, 11, schedule);
+    get_key(k, 12, schedule);
+    AES192_ENC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) ciphertext, m);
 }
 void aes256_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes256_sched_enc_t schedule) {
     __m128i m = _mm_loadu_si128((__m128i *) plaintext);
-    m = aes256_do_enc_block_amd64(m, S(0), S(1), S(2), S(3), S(4), S(5), S(6), S(7), S(8), S(9), S(10), S(11), S(12), S(13), S(14));
+    get_keys_0_10(k, schedule)
+    get_key(k, 11, schedule);
+    get_key(k, 12, schedule);
+    get_key(k, 13, schedule);
+    get_key(k, 14, schedule);
+    AES256_ENC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) ciphertext, m);
 }
 
 /* --- Decrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
 void aes128_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes128_sched_full_t schedule) {
     __m128i m = _mm_loadu_si128((__m128i *) ciphertext);
-    m = aes128_do_dec_block_amd64(m, S(0), S(10), S(11), S(12), S(13), S(14), S(15), S(16), S(17), S(18), S(19));
+    get_11_keys(k, schedule, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
+    AES128_DEC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) plaintext, m);
 }
 void aes192_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes192_sched_full_t schedule) {
     __m128i m = _mm_loadu_si128((__m128i *) ciphertext);
-    m = aes128_do_dec_block_amd64(m, S(0), S(12), S(13), S(14), S(15), S(16), S(17), S(18), S(19), S(20), S(21), S(22), S(23));
+    get_11_keys(k, schedule, 0, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21)
+    get_key(k, 22, schedule);
+    get_key(k, 23, schedule);
+    AES192_DEC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) plaintext, m);
 }
 void aes256_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes256_sched_full_t schedule) {
     __m128i m = _mm_loadu_si128((__m128i *) ciphertext);
-    m = aes128_do_dec_block_amd64(m, S(0), S(14), S(15), S(16), S(17), S(18), S(19), S(20), S(21), S(22), S(23), S(24), S(25), S(26), S(27));
+    get_11_keys(k, schedule, 0, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
+    get_key(k, 24, schedule);
+    get_key(k, 25, schedule);
+    get_key(k, 26, schedule);
+    get_key(k, 27, schedule);
+    AES256_DEC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) plaintext, m);
 }
-#undef S
+
+#undef get_key
+#undef get_11_keys
+#undef get_keys_0_10
 
 /* Self test return cases
  *   0: no error
