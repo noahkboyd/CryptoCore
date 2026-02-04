@@ -8,6 +8,14 @@
  * Inspiration: https://stackoverflow.com/questions/50491807/aes-ni-intrinsics-with-192-and-256-bits-keys
  */
 
+/* Table of Contents
+ *  - /* --- Key schedule generators internal --- */
+ *  - /* --- Key schedule generators --- (writes to provided array) */
+ *  - /* --- Transform rounds internal --- */
+ *  - /* --- Encrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
+ *  - /* --- Decrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
+ */
+
 #include "aes.h"
 #include <wmmintrin.h> /* for intrinsics for AES-NI */
 
@@ -25,7 +33,7 @@
 #endif
 #endif
 
-/* --- Key schedule generators --- (writes to provided array) */
+/* --- Key schedule generators internal --- */
 
 /* AES key expansion || next 4 words in generation cycle
     - shared macro for 128, 256 bit keys
@@ -70,23 +78,43 @@ static __m128i AES_KX_GEN_5_8(__m128i above_words, __m128i last_word) {
     return _mm_xor_si128(above_words, keygen);
 }
 
+/* --- Key schedule generators --- (writes to provided array) */
+
 void aes128_load_key_enc_only(const aes128_key_t key, aes128_sched_enc_t schedule) {
     __m128i *s = (__m128i *) schedule;
     __m128i last = _mm_loadu_si128((const __m128i*) key);
-    _mm_storeu_si128(s++, last); // First 4 words = original key
+    _mm_storeu_si128(s, last); // First 4 words = original key
 
-    #define internal(rcon) last = AES_KX_NXT4(last, last, rcon); _mm_storeu_si128(s++, last);
-    internal(0x01);
-    internal(0x02);
-    internal(0x04);
-    internal(0x08);
-    internal(0x10);
-    internal(0x20);
-    internal(0x40);
-    internal(0x80);
-    internal(0x1B);
-    _mm_storeu_si128(s, AES_KX_NXT4(last, last, 0x36));
-    #undef internal
+    __m128i keygen = _mm_aeskeygenassist_si128(last, 0x01);
+    uint8_t next_case = 0;
+    rcon_cases_loop: // I'm the best
+    // key expansion part || 4 words at a time
+    keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(3, 3, 3, 3)); // Copy last word to all 4 words in keygen
+    last = _mm_xor_si128(last, _mm_slli_si128(last, 4)); // xor's of: 0, 1 offsets
+    last = _mm_xor_si128(last, _mm_slli_si128(last, 8)); // xor's of: 0, 1, 2, 3 offsets
+    last _mm_xor_si128(last, keygen);
+    _mm_storeu_si128(++s, last); // move pointer before store
+    switch (next_case) {
+        #define case_block(THIS_CASE, NEXT_CASE, rcon)          \
+            case THIS_CASE:                                     \
+                keygen = _mm_aeskeygenassist_si128(last, rcon); \
+                next_case = NEXT_CASE;                          \
+                goto rcon_cases_loop;
+        case_block(0, 1, 0x02)
+        case_block(1, 2, 0x04)
+        case_block(2, 3, 0x08)
+        case_block(3, 4, 0x10)
+        case_block(4, 5, 0x20)
+        case_block(5, 6, 0x40)
+        case_block(6, 7, 0x80)
+        case_block(7, 8, 0x1B)
+        #undef case_block
+        case 8: // Last round - inlined
+            keygen = _mm_aeskeygenassist_si128(last, 0x36);
+            next_case = 9;
+            goto rcon_cases_loop;
+        case 9: return;
+    }
 }
 
 void aes192_load_key_enc_only(const aes192_key_t key, aes192_sched_enc_t schedule) {
@@ -189,7 +217,7 @@ void aes256_load_key(const aes256_key_t key, aes256_sched_full_t schedule) {
     ks[27] = _mm_aesimc_si128(ks[1]);
 }
 
-/* --- Block transform internal --- */
+/* --- Transform rounds internal --- */
 
 /* Agnostic internal shared round operations */
 /* This define concats arg token k with 0-9 for k0-k9 */

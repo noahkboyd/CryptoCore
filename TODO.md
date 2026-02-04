@@ -1,8 +1,11 @@
 To-Do:
-- Check that everything works
+- Variadic macros
 - Pure C implementation - no intrinsics
-- Add check for AES, SSE2, etc extensions
-  - Figure out each extension that is used
-  - Each for the public api should check for hardware acceleration
+- Check that everything works
+- System checking
+  - Add check for AES, SSE2, etc extensions
+    - Figure out each extension that is used
+    - Each for the public api should check for hardware acceleration
+  - Add macros for different architectures
 - Add support for modes
-- Add macros for different architectures
+- multi-threading
