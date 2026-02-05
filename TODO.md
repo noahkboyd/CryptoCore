@@ -1,5 +1,4 @@
 To-Do:
-- Variadic macros
 - Pure C implementation - no intrinsics
 - Check that everything works
 - System checking

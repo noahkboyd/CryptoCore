@@ -9,7 +9,6 @@
  */
 
 /* Table of Contents
- *  - /* --- Key schedule generators internal --- */
  *  - /* --- Key schedule generators --- (writes to provided array) */
  *  - /* --- Transform rounds internal --- */
  *  - /* --- Encrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
@@ -33,40 +32,92 @@
 #endif
 #endif
 
-/* --- Key schedule generators internal --- */
+/* --- Key schedule generators --- (writes to provided array)
+ * keygenassist needs const imm8 values - makes it interesting
+ */
 
-/* AES key expansion || next 4 words in generation cycle
-    - shared macro for 128, 256 bit keys
-    - (keygen assist needs const imm8 values -> macro) */
-#define AES_KX_NXT4(above_words, last_word, rcon) \
-    aes_key_expansion_next4words(above_words, _mm_aeskeygenassist_si128(last_word, rcon))
+void aes128_load_key_enc_only(const aes128_key_t key, aes128_sched_enc_t schedule) {
+    __m128i *s = (__m128i *) schedule;
+    __m128i last = _mm_loadu_si128((const __m128i*) key);
+    _mm_storeu_si128(s, last); // First 4 words = original key
 
-static __m128i aes_key_expansion_next4words(__m128i key, __m128i keygen) {
-    keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(3, 3, 3, 3));
-    key = _mm_xor_si128(key, _mm_slli_si128(key, 4)); // xor's of: 0, 1 offsets
-    key = _mm_xor_si128(key, _mm_slli_si128(key, 8)); // xor's of: 0, 1, 2, 3 offsets
-    return _mm_xor_si128(key, keygen);
+    __m128i keygen = _mm_aeskeygenassist_si128(last, 0x01);
+    uint8_t next_case = 0;
+    rcon_cases_loop:
+    // key expansion part || 4 words at a time
+    last = _mm_xor_si128(last, _mm_slli_si128(last, 4)); // xor's of: 0, 1 offsets
+    last = _mm_xor_si128(last, _mm_slli_si128(last, 8)); // xor's of: 0, 1, 2, 3 offsets
+    keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(3, 3, 3, 3)); // Copy last word to all 4 words in keygen
+    last _mm_xor_si128(last, keygen);
+    _mm_storeu_si128(++s, last); // move pointer before store
+    switch (next_case) {
+        #define case_block(THIS_CASE, NEXT_CASE, rcon)          \
+            case THIS_CASE: next_case = NEXT_CASE;              \
+                keygen = _mm_aeskeygenassist_si128(last, rcon); \
+                goto rcon_cases_loop;
+        case_block(0, 1, 0x02)
+        case_block(1, 2, 0x04)
+        case_block(2, 3, 0x08)
+        case_block(3, 4, 0x10)
+        case_block(4, 5, 0x20)
+        case_block(5, 6, 0x40)
+        case_block(6, 7, 0x80)
+        case_block(7, 8, 0x1B)
+        case_block(8, 9, 0x36)
+        #undef case_block
+        case 9: return;
+    }
 }
 
-/* AES key expansion || next 4 words in generation cycle
-    - macro for 192 bit keys
-    - (keygen assist needs const imm8 values -> macro) */
-#define AES_KX_NXT4_192(above_words, last_word, rcon) \
-    aes_key_expansion_next4words_192(above_words, _mm_aeskeygenassist_si128(last_word, rcon))
+void aes192_load_key_enc_only(const aes192_key_t key, aes192_sched_enc_t schedule) {
+    uint32_t *s = (uint32_t*) schedule;
+    __m128i last_f4 = _mm_loadu_si128((const __m128i*) key);
+    __m128i last_56 = _mm_loadl_epi64((const __m128i*) (key + 4));
+    _mm_storeu_si128((const __m128i*) s, last_f4); s += 4; // First 6 words = original key
+    _mm_storel_epi64((const __m128i*) s, last_56); s += 2; 
 
-static __m128i aes_key_expansion_next4words_192(__m128i key, __m128i keygen) {
-    keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(1, 1, 1, 1));
-    key = _mm_xor_si128(key, _mm_slli_si128(key, 4)); // xor's of: 0, 1 offsets
-    key = _mm_xor_si128(key, _mm_slli_si128(key, 8)); // xor's of: 0, 1, 2, 3 offsets
-    return _mm_xor_si128(key, keygen);
+    __m128i keygen = _mm_aeskeygenassist_si128(last_56, 0x01);
+    __m128i subword;
+    uint8_t next_case = 0;
+    goto first_four;
+    rcon_cases_loop:
+    // key expansion part || 6 words at a time
+    // last two (5-6)
+    subword = _mm_aeskeygenassist_si128(last_f4, 0x00);
+    subword = _mm_shuffle_epi32(subword, _MM_SHUFFLE(2, 2, 2, 2)); // Copy 3rd word to all 4 words of subword
+    last_56 = _mm_xor_si128(last_56, _mm_slli_si128(last_56, 4)); // xor's of: 0, 1 offsets
+    last_56 =  _mm_xor_si128(last_56, subword);
+    _mm_storel_epi64((__m128i*)s, last_56); s += 2; 
+    first_four:
+    last_f4 = _mm_xor_si128(last_f4, _mm_slli_si128(last_f4, 4)); // xor's of: 0, 1 offsets
+    last_f4 = _mm_xor_si128(last_f4, _mm_slli_si128(last_f4, 8)); // xor's of: 0, 1, 2, 3 offsets
+    keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(1, 1, 1, 1)); // Copy 2nd word to all 4 words of keygen
+    last_f4 = _mm_xor_si128(last_f4, keygen);
+    _mm_storeu_si128((const __m128i*) s, last_f4); s += 4;
+    switch (next_case) {
+        #define case_block(THIS_CASE, NEXT_CASE, rcon)             \
+            case THIS_CASE: next_case = NEXT_CASE;                 \
+                keygen = _mm_aeskeygenassist_si128(last_56, rcon); \
+                goto rcon_cases_loop;
+        case_block(0, 1, 0x02)
+        case_block(1, 2, 0x04)
+        case_block(2, 3, 0x08)
+        case_block(3, 4, 0x10)
+        case_block(4, 5, 0x20)
+        case_block(5, 6, 0x40)
+        #undef case_block
+        case 6: next_case = 7; // last iteration only needs 4 words
+            keygen = _mm_aeskeygenassist_si128(last_56, 0x80);
+            goto first_four;
+        case 7: return;
+    }
 }
 
-/* AES key expansion || 5th-6th in generation cycle */
-static __m128i AES_KX_GEN_5_6(__m128i above_words, __m128i last_word) {
-    __m128i keygen = _mm_aeskeygenassist_si128(last_word, 0x00);
-    keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(2, 2, 2, 2));
-    above_words = _mm_xor_si128(above_words, _mm_slli_si128(above_words, 4)); // xor's of: 0, 1 offsets
-    return _mm_xor_si128(above_words, keygen);
+#define aes_key_expansion_next4words(above_words, keygen, next_key) { \
+    keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(3, 3, 3, 3)); /* Copy last word to all 4 words in keygen */   \
+    above_words = _mm_xor_si128(above_words, _mm_slli_si128(above_words, 4)); /* xor's of: 0, 1       offsets */ \
+    above_words = _mm_xor_si128(above_words, _mm_slli_si128(above_words, 8)); /* xor's of: 0, 1, 2, 3 offsets */ \
+    next_key = _mm_xor_si128(above_words, keygen); \
 }
 
 /* AES key expansion || 5th-8th in generation cycle */
@@ -78,77 +129,17 @@ static __m128i AES_KX_GEN_5_8(__m128i above_words, __m128i last_word) {
     return _mm_xor_si128(above_words, keygen);
 }
 
-/* --- Key schedule generators --- (writes to provided array) */
-
-void aes128_load_key_enc_only(const aes128_key_t key, aes128_sched_enc_t schedule) {
-    __m128i *s = (__m128i *) schedule;
-    __m128i last = _mm_loadu_si128((const __m128i*) key);
-    _mm_storeu_si128(s, last); // First 4 words = original key
-
-    __m128i keygen = _mm_aeskeygenassist_si128(last, 0x01);
-    uint8_t next_case = 0;
-    rcon_cases_loop: // I'm the best
-    // key expansion part || 4 words at a time
-    keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(3, 3, 3, 3)); // Copy last word to all 4 words in keygen
-    last = _mm_xor_si128(last, _mm_slli_si128(last, 4)); // xor's of: 0, 1 offsets
-    last = _mm_xor_si128(last, _mm_slli_si128(last, 8)); // xor's of: 0, 1, 2, 3 offsets
-    last _mm_xor_si128(last, keygen);
-    _mm_storeu_si128(++s, last); // move pointer before store
-    switch (next_case) {
-        #define case_block(THIS_CASE, NEXT_CASE, rcon)          \
-            case THIS_CASE:                                     \
-                keygen = _mm_aeskeygenassist_si128(last, rcon); \
-                next_case = NEXT_CASE;                          \
-                goto rcon_cases_loop;
-        case_block(0, 1, 0x02)
-        case_block(1, 2, 0x04)
-        case_block(2, 3, 0x08)
-        case_block(3, 4, 0x10)
-        case_block(4, 5, 0x20)
-        case_block(5, 6, 0x40)
-        case_block(6, 7, 0x80)
-        case_block(7, 8, 0x1B)
-        #undef case_block
-        case 8: // Last round - inlined
-            keygen = _mm_aeskeygenassist_si128(last, 0x36);
-            next_case = 9;
-            goto rcon_cases_loop;
-        case 9: return;
-    }
-}
-
-void aes192_load_key_enc_only(const aes192_key_t key, aes192_sched_enc_t schedule) {
-    uint32_t *ks = (uint32_t*) schedule;
-    __m128i prev_f4 = _mm_loadu_si128((const __m128i*) key);
-    __m128i prev_n2 = _mm_loadl_epi64((const __m128i*) (key + 4));
-    _mm_storeu_si128((const __m128i*) ks, prev_f4); ks += 4; // First 6 words = original key
-    _mm_storeu_si128((const __m128i*) ks, prev_n2); ks += 2;
-
-    #define internal(rcon) \
-        prev_f4 = AES_KX_NXT4_192(prev_f4, prev_n2, rcon); \
-        prev_n2 = AES_KX_GEN_5_6(prev_n2, prev_f4); \
-        _mm_storeu_si128((const __m128i*) ks, prev_f4); ks += 4; \
-        _mm_storel_epi64((__m128i*)ks, prev_n2); ks += 2;
-    internal(0x01);
-    internal(0x02);
-    internal(0x04);
-    internal(0x08);
-    internal(0x10);
-    internal(0x20);
-    internal(0x40);
-    _mm_storeu_si128((const __m128i*) ks, AES_KX_NXT4_192(prev_f4, prev_n2, 0x80));
-    #undef internal
-}
-
 void aes256_load_key_enc_only(const aes256_key_t key, aes256_sched_enc_t schedule) {
     __m128i *s = (__m128i * ) schedule;
     __m128i a = _mm_loadu_si128((const __m128i*) key);
     __m128i b = _mm_loadu_si128((const __m128i*) (key + 16));
     _mm_storeu_si128(s++, a); // First 8 words = original key
     _mm_storeu_si128(s++, b);
+    __m128i keygen;
 
     #define internal(rcon) \
-        a = AES_KX_NXT4(a, b, rcon); _mm_storeu_si128(s++, a); \
+        keygen = _mm_aeskeygenassist_si128(b, rcon); \
+        aes_key_expansion_next4words(a, keygen, a); _mm_storeu_si128(s++, a); \
         b = AES_KX_GEN_5_8(b, a); _mm_storeu_si128(s++, b);
     internal(0x01);
     internal(0x02);
@@ -156,7 +147,8 @@ void aes256_load_key_enc_only(const aes256_key_t key, aes256_sched_enc_t schedul
     internal(0x08);
     internal(0x10);
     internal(0x20);
-    a = AES_KX_NXT4(a, b, 0x40); _mm_storeu_si128(s++, a);
+    keygen = _mm_aeskeygenassist_si128(b, 0x40);
+    aes_key_expansion_next4words(a, keygen, a); _mm_storeu_si128(s++, a);
     _mm_storeu_si128(s, AES_KX_GEN_5_8(b, a));
     #undef internal
 }
