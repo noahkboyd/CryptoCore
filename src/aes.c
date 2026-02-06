@@ -9,17 +9,17 @@
  */
 
 /* Table of Contents
- *  - /* --- Key schedule generators --- (writes to provided array) */
- *  - /* --- Transform rounds internal --- */
- *  - /* --- Encrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
- *  - /* --- Decrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
+ *  --- Key schedule generators --- (writes to provided array)
+ *  --- Transform rounds internal ---
+ *  --- Encrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer)
+ *  --- Decrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer)
  */
 
 #include "aes.h"
 #include <wmmintrin.h> /* for intrinsics for AES-NI */
 
 /* Aggressive inline macro for low-cost wrappers */
-#ifndef(INLINE)
+#ifndef INLINE
 #if defined(_MSC_VER)
     // Microsoft Visual C++
     #define INLINE __forceinline
@@ -42,9 +42,9 @@
     keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(3, 3, 3, 3)); /* Copy last word to all 4 words in keygen */   \
     above_words = _mm_xor_si128(above_words, keygen);
 
-void aes128_load_key_enc_only(const aes128_key_t key, aes128_sched_enc_t schedule) {
-    __m128i *s = (__m128i *) schedule;
-    __m128i last = _mm_loadu_si128((const __m128i*) key);
+void aes128_load_key_enc_only(const aes128_key_t* key, aes128_sched_enc_t* schedule) {
+    __m128i *s = (__m128i *) (schedule->bytes);
+    __m128i last = _mm_loadu_si128((const __m128i*) (key->bytes));
     _mm_storeu_si128(s, last); // First 4 words = original key
 
     __m128i keygen = _mm_aeskeygenassist_si128(last, 0x01);
@@ -74,10 +74,10 @@ void aes128_load_key_enc_only(const aes128_key_t key, aes128_sched_enc_t schedul
     }
 }
 
-void aes192_load_key_enc_only(const aes192_key_t key, aes192_sched_enc_t schedule) {
-    uint32_t *s = (uint32_t*) schedule;
-    __m128i last_f4 = _mm_loadu_si128((const __m128i*) key);
-    __m128i last_56 = _mm_loadl_epi64(((const __m128i*) key) + 1);
+void aes192_load_key_enc_only(const aes192_key_t* key, aes192_sched_enc_t* schedule) {
+    uint32_t *s = (uint32_t*) (schedule->bytes);
+    __m128i last_f4 = _mm_loadu_si128((const __m128i*) (key->bytes));
+    __m128i last_56 = _mm_loadl_epi64(((const __m128i*) (key->bytes)) + 1);
     _mm_storeu_si128((const __m128i*) s, last_f4); s += 4; // First 6 words = original key
     _mm_storel_epi64((const __m128i*) s, last_56); s += 2; 
 
@@ -117,10 +117,10 @@ void aes192_load_key_enc_only(const aes192_key_t key, aes192_sched_enc_t schedul
     }
 }
 
-void aes256_load_key_enc_only(const aes256_key_t key, aes256_sched_enc_t schedule) {
-    __m128i *s = (__m128i * ) schedule;
-    __m128i a = _mm_loadu_si128((const __m128i*) key);
-    __m128i b = _mm_loadu_si128(((const __m128i*) key) + 1);
+void aes256_load_key_enc_only(const aes256_key_t* key, aes256_sched_enc_t* schedule) {
+    __m128i *s = (__m128i * ) (schedule->bytes);
+    __m128i a = _mm_loadu_si128((const __m128i*) (key->bytes));
+    __m128i b = _mm_loadu_si128(((const __m128i*) (key->bytes)) + 1);
     _mm_storeu_si128(s++, a); // First 8 words = original key
     _mm_storeu_si128(s, b);
 
@@ -165,8 +165,8 @@ void aes256_load_key_enc_only(const aes256_key_t key, aes256_sched_enc_t schedul
  * k[0] shared by first encryption & last decryption round (is the original user key)
  */
 
- void aes128_load_key(const aes128_key_t key, aes128_sched_full_t schedule) {
-    __m128i *ks = schedule;
+ void aes128_load_key(const aes128_key_t* key, aes128_sched_full_t* schedule) {
+    __m128i *ks = schedule->bytes;
     aes128_load_key_enc_only(key, ks);
 
     ks[11] = _mm_aesimc_si128(ks[9]);
@@ -180,8 +180,8 @@ void aes256_load_key_enc_only(const aes256_key_t key, aes256_sched_enc_t schedul
     ks[19] = _mm_aesimc_si128(ks[1]);
 }
 
-void aes192_load_key(const aes192_key_t key, aes192_sched_full_t schedule) {
-    __m128i *ks = schedule;
+void aes192_load_key(const aes192_key_t* key, aes192_sched_full_t* schedule) {
+    __m128i *ks = schedule->bytes;
     aes192_load_key_enc_only(key, ks);
 
     ks[13] = _mm_aesimc_si128(ks[11]);
@@ -197,8 +197,8 @@ void aes192_load_key(const aes192_key_t key, aes192_sched_full_t schedule) {
     ks[23] = _mm_aesimc_si128(ks[1]);
 }
 
-void aes256_load_key(const aes256_key_t key, aes256_sched_full_t schedule) {
-    __m128i *ks = schedule;
+void aes256_load_key(const aes256_key_t* key, aes256_sched_full_t* schedule) {
+    __m128i *ks = schedule->bytes;
     aes256_load_key_enc_only(key, ks);
 
     ks[15] = _mm_aesimc_si128(ks[13]);
@@ -232,7 +232,7 @@ void aes256_load_key(const aes256_key_t key, aes256_sched_full_t schedule) {
     m = _mm_aesenc_si128(m, k##8); \
     m = _mm_aesenc_si128(m, k##9);
 /* This define concats arg token k with i0-i9 (int literals - not macros themselves) for ki0-ki9 */
-#define AES_AGNOS_DEC_ROUNDS_0_9_AMD64(m, k, i0, i1, i2, i3, i4, i5, i6, i7, i7, i8, i9) \
+#define AES_AGNOS_DEC_ROUNDS_0_9_AMD64(m, k, i0, i1, i2, i3, i4, i5, i6, i7, i8, i9) \
     m = _mm_xor_si128   (m, k##i0); \
     m = _mm_aesdec_si128(m, k##i1); \
     m = _mm_aesdec_si128(m, k##i2); \
@@ -306,53 +306,59 @@ void aes256_load_key(const aes256_key_t key, aes256_sched_full_t schedule) {
 #define get_keys_0_10(k, schedule_ptr) get_11_keys(k, schedule_ptr, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 
 /* --- Encrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
-void aes128_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes128_sched_enc_t schedule) {
+void aes128_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes128_sched_enc_t* schedule) {
+    uint8_t* s = schedule->bytes;
     __m128i m = _mm_loadu_si128((__m128i *) plaintext);
-    get_keys_0_10(k, schedule)
+    get_keys_0_10(k, s)
     AES128_ENC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) ciphertext, m);
 }
-void aes192_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes192_sched_enc_t schedule) {
+void aes192_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes192_sched_enc_t* schedule) {
+    uint8_t* s = schedule->bytes;
     __m128i m = _mm_loadu_si128((__m128i *) plaintext);
-    get_keys_0_10(k, schedule)
-    get_key(k, 11, schedule);
-    get_key(k, 12, schedule);
+    get_keys_0_10(k, s)
+    get_key(k, 11, s);
+    get_key(k, 12, s);
     AES192_ENC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) ciphertext, m);
 }
-void aes256_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes256_sched_enc_t schedule) {
+void aes256_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes256_sched_enc_t* schedule) {
+    uint8_t* s = schedule->bytes;
     __m128i m = _mm_loadu_si128((__m128i *) plaintext);
-    get_keys_0_10(k, schedule)
-    get_key(k, 11, schedule);
-    get_key(k, 12, schedule);
-    get_key(k, 13, schedule);
-    get_key(k, 14, schedule);
+    get_keys_0_10(k, s)
+    get_key(k, 11, s);
+    get_key(k, 12, s);
+    get_key(k, 13, s);
+    get_key(k, 14, s);
     AES256_ENC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) ciphertext, m);
 }
 
 /* --- Decrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
-void aes128_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes128_sched_full_t schedule) {
+void aes128_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes128_sched_full_t* schedule) {
+    uint8_t* s = schedule->bytes;
     __m128i m = _mm_loadu_si128((__m128i *) ciphertext);
-    get_11_keys(k, schedule, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
+    get_11_keys(k, s, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
     AES128_DEC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) plaintext, m);
 }
-void aes192_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes192_sched_full_t schedule) {
+void aes192_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes192_sched_full_t* schedule) {
+    uint8_t* s = schedule->bytes;
     __m128i m = _mm_loadu_si128((__m128i *) ciphertext);
-    get_11_keys(k, schedule, 0, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21)
-    get_key(k, 22, schedule);
-    get_key(k, 23, schedule);
+    get_11_keys(k, s, 0, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21)
+    get_key(k, 22, s);
+    get_key(k, 23, s);
     AES192_DEC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) plaintext, m);
 }
-void aes256_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes256_sched_full_t schedule) {
+void aes256_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes256_sched_full_t* schedule) {
+    uint8_t* s = schedule->bytes;
     __m128i m = _mm_loadu_si128((__m128i *) ciphertext);
-    get_11_keys(k, schedule, 0, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
-    get_key(k, 24, schedule);
-    get_key(k, 25, schedule);
-    get_key(k, 26, schedule);
-    get_key(k, 27, schedule);
+    get_11_keys(k, s, 0, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
+    get_key(k, 24, s);
+    get_key(k, 25, s);
+    get_key(k, 26, s);
+    get_key(k, 27, s);
     AES256_DEC_BLOCK_AMD64(m, k)
     _mm_storeu_si128((__m128i *) plaintext, m);
 }

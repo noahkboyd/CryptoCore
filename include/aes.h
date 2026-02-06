@@ -20,39 +20,39 @@
  */
 
 /* --- Key types --- */
-typedef uint8_t aes128_key_t[16];
-typedef uint8_t aes192_key_t[24];
-typedef uint8_t aes256_key_t[32];
+typedef struct { uint8_t bytes[16]; } aes128_key_t;
+typedef struct { uint8_t bytes[24]; } aes192_key_t;
+typedef struct { uint8_t bytes[32]; } aes256_key_t;
 /* Helper macros to build typed key literals (16, 24, 32 bytes) */
-#define AES128_KEY(...) ((const aes128_key_t){ __VA_ARGS__ })
-#define AES192_KEY(...) ((const aes192_key_t){ __VA_ARGS__ })
-#define AES256_KEY(...) ((const aes256_key_t){ __VA_ARGS__ })
+#define AES128_KEY(...) ((const aes128_key_t){ .bytes = { __VA_ARGS__ } })
+#define AES192_KEY(...) ((const aes192_key_t){ .bytes = { __VA_ARGS__ } })
+#define AES256_KEY(...) ((const aes256_key_t){ .bytes = { __VA_ARGS__ } })
 
-/* --- Full Key schedule types --- (for encryption & decryption) */
-typedef uint8_t aes128_sched_full_t[320]; /* 20 round keys = 320 bytes (128b rnd key=16B) */
-typedef uint8_t aes192_sched_full_t[384]; /* 24 round keys = 384 bytes */
-typedef uint8_t aes256_sched_full_t[448]; /* 28 round keys = 448 bytes */
+/* --- Full schedule types --- (for encryption & decryption) */
+typedef struct { uint8_t bytes[320]; } aes128_sched_full_t; /* 20 round keys = 320 bytes (128b rnd key=16B) */
+typedef struct { uint8_t bytes[384]; } aes192_sched_full_t; /* 24 round keys = 384 bytes */
+typedef struct { uint8_t bytes[448]; } aes256_sched_full_t; /* 28 round keys = 448 bytes */
 /* --- Encryption-only schedule types --- */
-typedef uint8_t aes128_sched_enc_t[176];  /* 11 round keys = 176 bytes */
-typedef uint8_t aes192_sched_enc_t[208];  /* 13 round keys = 208 bytes */
-typedef uint8_t aes256_sched_enc_t[240];  /* 15 round keys = 240 bytes */
+typedef struct { uint8_t bytes[176]; } aes128_sched_enc_t;  /* 11 round keys = 176 bytes */
+typedef struct { uint8_t bytes[208]; } aes192_sched_enc_t;  /* 13 round keys = 208 bytes */
+typedef struct { uint8_t bytes[240]; } aes256_sched_enc_t;  /* 15 round keys = 240 bytes */
 
 /* --- Key schedule generators --- (writes to provided array) */
-void aes128_load_key(const aes128_key_t key, aes128_sched_full_t schedule);
-void aes192_load_key(const aes192_key_t key, aes192_sched_full_t schedule);
-void aes256_load_key(const aes256_key_t key, aes256_sched_full_t schedule);
-void aes128_load_key_enc_only(const aes128_key_t key, aes128_sched_enc_t schedule);
-void aes192_load_key_enc_only(const aes192_key_t key, aes192_sched_enc_t schedule);
-void aes256_load_key_enc_only(const aes256_key_t key, aes256_sched_enc_t schedule);
+void aes128_load_key(const aes128_key_t* key, aes128_sched_full_t* schedule);
+void aes192_load_key(const aes192_key_t* key, aes192_sched_full_t* schedule);
+void aes256_load_key(const aes256_key_t* key, aes256_sched_full_t* schedule);
+void aes128_load_key_enc_only(const aes128_key_t* key, aes128_sched_enc_t* schedule);
+void aes192_load_key_enc_only(const aes192_key_t* key, aes192_sched_enc_t* schedule);
+void aes256_load_key_enc_only(const aes256_key_t* key, aes256_sched_enc_t* schedule);
 
 /* --- Encrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
-void aes128_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes128_sched_enc_t schedule);
-void aes192_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes192_sched_enc_t schedule);
-void aes256_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes256_sched_enc_t schedule);
+void aes128_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes128_sched_enc_t* schedule);
+void aes192_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes192_sched_enc_t* schedule);
+void aes256_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes256_sched_enc_t* schedule);
 /* --- Decrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
-void aes128_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes128_sched_full_t schedule);
-void aes192_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes192_sched_full_t schedule);
-void aes256_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes256_sched_full_t schedule);
+void aes128_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes128_sched_full_t* schedule);
+void aes192_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes192_sched_full_t* schedule);
+void aes256_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes256_sched_full_t* schedule);
 
 /* Self test return cases
  *   0: no error
