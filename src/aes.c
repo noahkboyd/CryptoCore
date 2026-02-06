@@ -122,7 +122,7 @@ void aes256_load_key_enc_only(const aes256_key_t key, aes256_sched_enc_t schedul
     __m128i a = _mm_loadu_si128((const __m128i*) key);
     __m128i b = _mm_loadu_si128(((const __m128i*) key) + 1);
     _mm_storeu_si128(s++, a); // First 8 words = original key
-    _mm_storeu_si128(s++, b);
+    _mm_storeu_si128(s, b);
 
     __m128i keygen = _mm_aeskeygenassist_si128(b, 0x01);
     __m128i subword;
@@ -137,10 +137,10 @@ void aes256_load_key_enc_only(const aes256_key_t key, aes256_sched_enc_t schedul
     b = _mm_xor_si128(b, _mm_slli_si128(b, 4)); // xor's of: 0, 1 offsets
     b = _mm_xor_si128(b, _mm_slli_si128(b, 8)); // xor's of: 0, 1, 2, 3 offsets
     b = _mm_xor_si128(b, subword);
-    _mm_storeu_si128(s++, b);
+    _mm_storeu_si128(++s, b);
     first_four:
     AES_KEY_EXP_ITER_FIRST4(a, keygen)
-    _mm_storeu_si128(s++, a);
+    _mm_storeu_si128(++s, a);
     
     switch (next_case) {
         #define case_block(THIS_CASE, NEXT_CASE, rcon)       \
