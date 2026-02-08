@@ -47,22 +47,22 @@ void aes192_load_key_enc_only(const aes192_key_t* key, aes192_sched_enc_t* sched
 void aes256_load_key_enc_only(const aes256_key_t* key, aes256_sched_enc_t* schedule);
 
 /* --- Encrypt block transforms --- (in-place operation allowed) */
-void aes128_encrypt_block(const aes128_sched_enc_t*  schedule, const uint8_t plaintext[16], uint8_t ciphertext[16]);
-void aes192_encrypt_block(const aes192_sched_enc_t*  schedule, const uint8_t plaintext[16], uint8_t ciphertext[16]);
-void aes256_encrypt_block(const aes256_sched_enc_t*  schedule, const uint8_t plaintext[16], uint8_t ciphertext[16]);
+void aes128_encrypt_block(const aes128_sched_enc_t*  schedule, const uint8_t plain[16], uint8_t cipher[16]);
+void aes192_encrypt_block(const aes192_sched_enc_t*  schedule, const uint8_t plain[16], uint8_t cipher[16]);
+void aes256_encrypt_block(const aes256_sched_enc_t*  schedule, const uint8_t plain[16], uint8_t cipher[16]);
 /* --- Decrypt block transforms --- (in-place operation allowed) */
-void aes128_decrypt_block(const aes128_sched_full_t* schedule, const uint8_t ciphertext[16], uint8_t plaintext[16]);
-void aes192_decrypt_block(const aes192_sched_full_t* schedule, const uint8_t ciphertext[16], uint8_t plaintext[16]);
-void aes256_decrypt_block(const aes256_sched_full_t* schedule, const uint8_t ciphertext[16], uint8_t plaintext[16]);
+void aes128_decrypt_block(const aes128_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]);
+void aes192_decrypt_block(const aes192_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]);
+void aes256_decrypt_block(const aes256_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]);
 
 /* --- Encrypt blocks transforms --- (in-place operation allowed) */
-void aes128_encrypt_blocks(const aes128_sched_enc_t*  schedule, const uint8_t plaintext[16], uint8_t ciphertext[16]);
-void aes192_encrypt_blocks(const aes192_sched_enc_t*  schedule, const uint8_t plaintext[16], uint8_t ciphertext[16]);
-void aes256_encrypt_blocks(const aes256_sched_enc_t*  schedule, const uint8_t plaintext[16], uint8_t ciphertext[16]);
+void aes128_encrypt_blocks(const aes128_sched_enc_t*  schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks);
+void aes192_encrypt_blocks(const aes192_sched_enc_t*  schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks);
+void aes256_encrypt_blocks(const aes256_sched_enc_t*  schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks);
 /* --- Decrypt blocks transforms --- (in-place operation allowed) */
-void aes128_decrypt_blocks(const aes128_sched_full_t* schedule, const uint8_t ciphertext[16], uint8_t plaintext[16]);
-void aes192_decrypt_blocks(const aes192_sched_full_t* schedule, const uint8_t ciphertext[16], uint8_t plaintext[16]);
-void aes256_decrypt_blocks(const aes256_sched_full_t* schedule, const uint8_t ciphertext[16], uint8_t plaintext[16]);
+void aes128_decrypt_blocks(const aes128_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks);
+void aes192_decrypt_blocks(const aes192_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks);
+void aes256_decrypt_blocks(const aes256_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks);
 
 /* Self test return cases
  *   0: no error

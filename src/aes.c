@@ -11,8 +11,10 @@
 /* Table of Contents
  *  --- Key schedule generators --- (writes to provided array)
  *  --- Transform rounds internal ---
- *  --- Encrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer)
- *  --- Decrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer)
+ *  --- Encrypt blocks transforms --- (in-place operation allowed)
+ *  --- Decrypt blocks transforms --- (in-place operation allowed)
+ *  --- Encrypt block transforms --- (in-place operation allowed)
+ *  --- Decrypt block transforms --- (in-place operation allowed)
  */
 
 #include "aes.h"
@@ -305,62 +307,108 @@ void aes256_load_key(const aes256_key_t* key, aes256_sched_full_t* schedule) {
     get_key(k, i10, schedule_ptr);
 #define get_keys_0_10(k, schedule_ptr) get_11_keys(k, schedule_ptr, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 
-/* --- Encrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
-void aes128_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes128_sched_enc_t* schedule) {
-    uint8_t* s = schedule->bytes;
-    __m128i m = _mm_loadu_si128((__m128i *) plaintext);
+/* --- Encrypt blocks transforms --- (in-place operation allowed) */
+void aes128_encrypt_blocks(const aes128_sched_enc_t* schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks) {
+    const uint8_t* s = schedule->bytes;
     get_keys_0_10(k, s)
-    AES128_ENC_BLOCK_AMD64(m, k)
-    _mm_storeu_si128((__m128i *) ciphertext, m);
+
+    const uint8_t (*stop)[16] = plain + num_blocks;
+    while (plain < stop) {
+        __m128i m = _mm_loadu_si128((__m128i *) plain++);
+        AES128_ENC_BLOCK_AMD64(m, k)
+        _mm_storeu_si128((__m128i *) cipher++, m);
+    }
 }
-void aes192_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes192_sched_enc_t* schedule) {
-    uint8_t* s = schedule->bytes;
-    __m128i m = _mm_loadu_si128((__m128i *) plaintext);
+void aes192_encrypt_blocks(const aes192_sched_enc_t* schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks) {
+    const uint8_t* s = schedule->bytes;
     get_keys_0_10(k, s)
     get_key(k, 11, s);
     get_key(k, 12, s);
-    AES192_ENC_BLOCK_AMD64(m, k)
-    _mm_storeu_si128((__m128i *) ciphertext, m);
+
+    const uint8_t (*stop)[16] = plain + num_blocks;
+    while (plain < stop) {
+        __m128i m = _mm_loadu_si128((__m128i *) plain++);
+        AES192_ENC_BLOCK_AMD64(m, k)
+        _mm_storeu_si128((__m128i *) cipher++, m);
+    }
 }
-void aes256_encrypt_block(const uint8_t plaintext[16], uint8_t ciphertext[16], const aes256_sched_enc_t* schedule) {
-    uint8_t* s = schedule->bytes;
-    __m128i m = _mm_loadu_si128((__m128i *) plaintext);
+void aes256_encrypt_blocks(const aes256_sched_enc_t* schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks) {
+    const uint8_t* s = schedule->bytes;
     get_keys_0_10(k, s)
     get_key(k, 11, s);
     get_key(k, 12, s);
     get_key(k, 13, s);
     get_key(k, 14, s);
-    AES256_ENC_BLOCK_AMD64(m, k)
-    _mm_storeu_si128((__m128i *) ciphertext, m);
-}
 
-/* --- Decrypt block transforms --- (plaintext pointer can be equal to ciphertext pointer) */
-void aes128_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes128_sched_full_t* schedule) {
-    uint8_t* s = schedule->bytes;
-    __m128i m = _mm_loadu_si128((__m128i *) ciphertext);
-    get_11_keys(k, s, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
-    AES128_DEC_BLOCK_AMD64(m, k)
-    _mm_storeu_si128((__m128i *) plaintext, m);
+    const uint8_t (*stop)[16] = plain + num_blocks;
+    while (plain < stop) {
+        __m128i m = _mm_loadu_si128((__m128i *) plain++);
+        AES256_ENC_BLOCK_AMD64(m, k)
+        _mm_storeu_si128((__m128i *) cipher++, m);
+    }
 }
-void aes192_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes192_sched_full_t* schedule) {
-    uint8_t* s = schedule->bytes;
-    __m128i m = _mm_loadu_si128((__m128i *) ciphertext);
+/* --- Decrypt blocks transforms --- (in-place operation allowed) */
+void aes128_decrypt_blocks(const aes128_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks) {
+    const uint8_t* s = schedule->bytes;
+    get_11_keys(k, s, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
+
+    const uint8_t (*stop)[16] = plain + num_blocks;
+    while (plain < stop) {
+        __m128i m = _mm_loadu_si128((__m128i *) cipher++);
+        AES128_DEC_BLOCK_AMD64(m, k)
+        _mm_storeu_si128((__m128i *) plain++, m);
+    }
+}
+void aes192_decrypt_blocks(const aes192_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks) {
+    const uint8_t* s = schedule->bytes;
     get_11_keys(k, s, 0, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21)
     get_key(k, 22, s);
     get_key(k, 23, s);
-    AES192_DEC_BLOCK_AMD64(m, k)
-    _mm_storeu_si128((__m128i *) plaintext, m);
+
+    const uint8_t (*stop)[16] = plain + num_blocks;
+    while (plain < stop) {
+        __m128i m = _mm_loadu_si128((__m128i *) cipher++);
+        AES192_DEC_BLOCK_AMD64(m, k)
+        _mm_storeu_si128((__m128i *) plain++, m);
+    }
 }
-void aes256_decrypt_block(const uint8_t ciphertext[16], uint8_t plaintext[16], const aes256_sched_full_t* schedule) {
-    uint8_t* s = schedule->bytes;
-    __m128i m = _mm_loadu_si128((__m128i *) ciphertext);
+void aes256_decrypt_blocks(const aes256_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks) {
+    const uint8_t* s = schedule->bytes;
     get_11_keys(k, s, 0, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
     get_key(k, 24, s);
     get_key(k, 25, s);
     get_key(k, 26, s);
     get_key(k, 27, s);
-    AES256_DEC_BLOCK_AMD64(m, k)
-    _mm_storeu_si128((__m128i *) plaintext, m);
+
+    const uint8_t (*stop)[16] = plain + num_blocks;
+    while (plain < stop) {
+        __m128i m = _mm_loadu_si128((__m128i *) cipher++);
+        AES256_DEC_BLOCK_AMD64(m, k)
+        _mm_storeu_si128((__m128i *) plain++, m);
+    }
+}
+
+
+/* --- Encrypt block transforms --- (in-place operation allowed) */
+void aes128_encrypt_block(const aes128_sched_enc_t* schedule, const uint8_t plain[16], uint8_t cipher[16]) {
+    aes128_encrypt_blocks(schedule, (const uint8_t (*)[16])plain, (uint8_t (*)[16])cipher, 1);
+}
+void aes192_encrypt_block(const aes192_sched_enc_t* schedule, const uint8_t plain[16], uint8_t cipher[16]) {
+    aes192_encrypt_blocks(schedule, (const uint8_t (*)[16])plain, (uint8_t (*)[16])cipher, 1);
+}
+void aes256_encrypt_block(const aes256_sched_enc_t* schedule, const uint8_t plain[16], uint8_t cipher[16]) {
+    aes256_encrypt_blocks(schedule, (const uint8_t (*)[16])plain, (uint8_t (*)[16])cipher, 1);
+}
+
+/* --- Decrypt block transforms --- (in-place operation allowed) */
+void aes128_decrypt_block(const aes128_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) {
+    aes128_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1);
+}
+void aes192_decrypt_block(const aes192_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) {
+    aes192_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1);
+}
+void aes256_decrypt_block(const aes256_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) {
+    aes256_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1);
 }
 
 #undef get_key
