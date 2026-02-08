@@ -9,6 +9,7 @@
  */
 
 /* Table of Contents
+ *  --- Startup Code ---
  *  --- Key schedule generators --- (writes to provided array)
  *  --- Transform rounds internal ---
  *  --- Encrypt blocks transforms --- (in-place operation allowed)
@@ -20,22 +21,74 @@
 #include "aes.h"
 #include <wmmintrin.h> /* for intrinsics for AES-NI */
 
-/* Aggressive inline macro for low-cost wrappers */
-#ifndef INLINE
-#if defined(_MSC_VER)
-    // Microsoft Visual C++
-    #define INLINE __forceinline
+#if !defined(CPUID) && !defined(CPUIDEX)
+#ifdef _MSC_VER
+    // Windows (MSVC) - Use <intrin.h>
+    #include <intrin.h>
+    #define CPUID(output, func)              __cpuid(output, func)
+    #define CPUIDEX(output, func, subfunc)    __cpuidex(output, func, subfunc)
 #elif defined(__GNUC__) || defined(__clang__)
-    // GCC or Clang
-    #define INLINE inline __attribute__((always_inline))
+    // Linux/macOS (GCC/Clang) - Use <cpuid.h>
+    #include <cpuid.h>
+    #define CPUID(output, func)              __cpuid((func), (output)[0], (output)[1], (output)[2], (output)[3])
+    #define CPUIDEX(output, func, subfunc)   __cpuid_count((func), (subfunc), (output)[0], (output)[1], (output)[2], (output)[3])
 #else
-    // Fallback for other compilers
-    #define INLINE inline
+    #error "Unsupported compiler (only MSVC, GCC, and Clang are supported)"
 #endif
 #endif
 
+/* --- Multi-platform Startup Macro --- */
+#ifndef INITIALIZER
+#if defined(__GNUC__) || defined(__clang__)
+    // For GCC/Clang: Use the constructor attribute
+    #define INITIALIZER(f) \
+        static void f(void) __attribute__((constructor)); \
+        static void f(void)
+#elif defined(_MSC_VER)
+    // For MSVC: Use pragma section "magic"
+    // .CRT$XCU is the "User" initializer segment
+    #pragma section(".CRT$XCU", read)
+    #define INITIALIZER(f) \
+        static void f(void); \
+        __declspec(allocate(".CRT$XCU")) void (*f##_ptr)(void) = f; \
+        static void f(void)
+#else
+    #error "Unknown compiler. Please add a constructor implementation."
+#endif
+#endif
+
+/* AES hardware acceleration (SSE2, AES) */
+bool aes_support = false;
+
+INITIALIZER(startup) {
+    uint32_t nIds_, ecx, edx;
+    uint32_t cpui[4];
+
+    // Calling CPUID with 0x0 as the function_id argument
+    // gets the number of the highest valid function ID.
+    CPUID(cpui, 0);
+    nIds_ = cpui[0];
+
+    // load bitset with flags for function 0x00000001
+    if (nIds_ >= 1) {
+        CPUIDEX(cpui, 1, 0);
+        ecx = cpui[2];
+        edx = cpui[3];
+    } else {
+        ecx = 0; edx = 0;
+    }
+
+    bool aes  = (ecx >> 25) & 1;
+    bool sse2 = (edx >> 26) & 1;
+
+    aes_support = aes && sse2;
+}
+
 /* --- Key schedule generators --- (writes to provided array)
  * keygenassist needs const imm8 values - makes it interesting
+ * Generate decryption keys in reverse order.
+ * k[N-1] shared by last encryption & first decryption rounds
+ * k[0] shared by first encryption & last decryption round (is the original user key)
  */
 
 #define AES_KEY_EXP_ITER_FIRST4(above_words, keygen) \
@@ -44,178 +97,178 @@
     keygen = _mm_shuffle_epi32(keygen, _MM_SHUFFLE(3, 3, 3, 3)); /* Copy last word to all 4 words in keygen */   \
     above_words = _mm_xor_si128(above_words, keygen);
 
-void aes128_load_key_enc_only(const aes128_key_t* key, aes128_sched_enc_t* schedule) {
-    __m128i *s = (__m128i *) (schedule->bytes);
-    __m128i last = _mm_loadu_si128((const __m128i*) (key->bytes));
-    _mm_storeu_si128(s, last); // First 4 words = original key
+void aes128_load_key_internal(const aes128_key_t* key, aes128_sched_full_t* schedule, bool full) {
+    if (aes_support) {
+        __m128i *s = (__m128i *) (schedule->bytes);
+        __m128i last = _mm_loadu_si128((const __m128i*) (key->bytes));
+        _mm_storeu_si128(s, last); // First 4 words = original key
 
-    __m128i keygen = _mm_aeskeygenassist_si128(last, 0x01);
-    uint8_t next_case = 0;
+        __m128i keygen = _mm_aeskeygenassist_si128(last, 0x01);
+        uint8_t next_case = 0;
 
-    rcon_cases_loop:
-    // key expansion part || 4 words at a time (1 round key)
-    AES_KEY_EXP_ITER_FIRST4(last, keygen)
-    _mm_storeu_si128(++s, last); // move pointer before store
+        rcon_cases_loop:
+        // key expansion part || 4 words at a time (1 round key)
+        AES_KEY_EXP_ITER_FIRST4(last, keygen)
+        _mm_storeu_si128(++s, last); // move pointer before store
 
-    switch (next_case) {
-        #define case_block(THIS_CASE, NEXT_CASE, rcon)          \
-            case THIS_CASE: next_case = NEXT_CASE;              \
-                keygen = _mm_aeskeygenassist_si128(last, rcon); \
-                goto rcon_cases_loop;
-        case_block(0, 1, 0x02)
-        case_block(1, 2, 0x04)
-        case_block(2, 3, 0x08)
-        case_block(3, 4, 0x10)
-        case_block(4, 5, 0x20)
-        case_block(5, 6, 0x40)
-        case_block(6, 7, 0x80)
-        case_block(7, 8, 0x1B)
-        case_block(8, 9, 0x36)
-        #undef case_block
-        case 9: return;
+        switch (next_case) {
+            #define case_block(THIS_CASE, NEXT_CASE, rcon)          \
+                case THIS_CASE: next_case = NEXT_CASE;              \
+                    keygen = _mm_aeskeygenassist_si128(last, rcon); \
+                    goto rcon_cases_loop;
+            case_block(0, 1, 0x02)
+            case_block(1, 2, 0x04)
+            case_block(2, 3, 0x08)
+            case_block(3, 4, 0x10)
+            case_block(4, 5, 0x20)
+            case_block(5, 6, 0x40)
+            case_block(6, 7, 0x80)
+            case_block(7, 8, 0x1B)
+            case_block(8, 9, 0x36)
+            #undef case_block
+            case 9: return;
+        }
+
+        if (full) {
+            __m128i *ks = schedule->bytes;
+            ks[11] = _mm_aesimc_si128(ks[9]);
+            ks[12] = _mm_aesimc_si128(ks[8]);
+            ks[13] = _mm_aesimc_si128(ks[7]);
+            ks[14] = _mm_aesimc_si128(ks[6]);
+            ks[15] = _mm_aesimc_si128(ks[5]);
+            ks[16] = _mm_aesimc_si128(ks[4]);
+            ks[17] = _mm_aesimc_si128(ks[3]);
+            ks[18] = _mm_aesimc_si128(ks[2]);
+            ks[19] = _mm_aesimc_si128(ks[1]);
+        }
+        return;
     }
+    /* C implementation */
 }
 
-void aes192_load_key_enc_only(const aes192_key_t* key, aes192_sched_enc_t* schedule) {
-    uint32_t *s = (uint32_t*) (schedule->bytes);
-    __m128i last_f4 = _mm_loadu_si128((const __m128i*) (key->bytes));
-    __m128i last_56 = _mm_loadl_epi64(((const __m128i*) (key->bytes)) + 1);
-    _mm_storeu_si128((const __m128i*) s, last_f4); s += 4; // First 6 words = original key
-    _mm_storel_epi64((const __m128i*) s, last_56); s += 2; 
+void aes192_load_key_internal(const aes192_key_t* key, aes192_sched_full_t* schedule, bool full) {
+    if (aes_support) {
+        uint32_t *s = (uint32_t*) (schedule->bytes);
+        __m128i last_f4 = _mm_loadu_si128((const __m128i*) (key->bytes));
+        __m128i last_56 = _mm_loadl_epi64(((const __m128i*) (key->bytes)) + 1);
+        _mm_storeu_si128((const __m128i*) s, last_f4); s += 4; // First 6 words = original key
+        _mm_storel_epi64((const __m128i*) s, last_56); s += 2; 
 
-    __m128i keygen = _mm_aeskeygenassist_si128(last_56, 0x01);
-    __m128i subword;
-    uint8_t next_case = 0;
-    goto first_four;
+        __m128i keygen = _mm_aeskeygenassist_si128(last_56, 0x01);
+        __m128i subword;
+        uint8_t next_case = 0;
+        goto first_four;
 
-    rcon_cases_loop:
-    // key expansion part || 6 words at a time
-    // last two (5-6)
-    subword = _mm_aeskeygenassist_si128(last_f4, 0x00);
-    subword = _mm_shuffle_epi32(subword, _MM_SHUFFLE(2, 2, 2, 2)); // Copy 3rd word to all 4 words of subword
-    last_56 = _mm_xor_si128(last_56, _mm_slli_si128(last_56, 4)); // xor's of: 0, 1 offsets
-    last_56 =  _mm_xor_si128(last_56, subword);
-    _mm_storel_epi64((__m128i*)s, last_56); s += 2; 
-    first_four:
-    AES_KEY_EXP_ITER_FIRST4(last_f4, keygen)
-    _mm_storeu_si128((const __m128i*) s, last_f4); s += 4;
+        rcon_cases_loop:
+        // key expansion part || 6 words at a time || here for last two (5-6)
+        subword = _mm_aeskeygenassist_si128(last_f4, 0x00);
+        subword = _mm_shuffle_epi32(subword, _MM_SHUFFLE(2, 2, 2, 2)); // Copy 3rd word to all 4 words of subword
+        last_56 = _mm_xor_si128(last_56, _mm_slli_si128(last_56, 4)); // xor's of: 0, 1 offsets
+        last_56 =  _mm_xor_si128(last_56, subword);
+        _mm_storel_epi64((__m128i*)s, last_56); s += 2; 
+        first_four:
+        AES_KEY_EXP_ITER_FIRST4(last_f4, keygen)
+        _mm_storeu_si128((const __m128i*) s, last_f4); s += 4;
 
-    switch (next_case) {
-        #define case_block(THIS_CASE, NEXT_CASE, rcon)             \
-            case THIS_CASE: next_case = NEXT_CASE;                 \
-                keygen = _mm_aeskeygenassist_si128(last_56, rcon); \
-                goto rcon_cases_loop;
-        case_block(0, 1, 0x02)
-        case_block(1, 2, 0x04)
-        case_block(2, 3, 0x08)
-        case_block(3, 4, 0x10)
-        case_block(4, 5, 0x20)
-        case_block(5, 6, 0x40)
-        #undef case_block
-        case 6: next_case = 7; // last iteration only needs 4 words
-            keygen = _mm_aeskeygenassist_si128(last_56, 0x80);
-            goto first_four;
-        case 7: return;
+        switch (next_case) {
+            #define case_block(THIS_CASE, NEXT_CASE, rcon)             \
+                case THIS_CASE: next_case = NEXT_CASE;                 \
+                    keygen = _mm_aeskeygenassist_si128(last_56, rcon); \
+                    goto rcon_cases_loop;
+            case_block(0, 1, 0x02)
+            case_block(1, 2, 0x04)
+            case_block(2, 3, 0x08)
+            case_block(3, 4, 0x10)
+            case_block(4, 5, 0x20)
+            case_block(5, 6, 0x40)
+            #undef case_block
+            case 6: next_case = 7; // last iteration only needs 4 words
+                keygen = _mm_aeskeygenassist_si128(last_56, 0x80);
+                goto first_four;
+            case 7: return;
+        }
+
+        if (full) {
+            __m128i *ks = schedule->bytes;
+            ks[13] = _mm_aesimc_si128(ks[11]);
+            ks[14] = _mm_aesimc_si128(ks[10]);
+            ks[15] = _mm_aesimc_si128(ks[9]);
+            ks[16] = _mm_aesimc_si128(ks[8]);
+            ks[17] = _mm_aesimc_si128(ks[7]);
+            ks[18] = _mm_aesimc_si128(ks[6]);
+            ks[19] = _mm_aesimc_si128(ks[5]);
+            ks[20] = _mm_aesimc_si128(ks[4]);
+            ks[21] = _mm_aesimc_si128(ks[3]);
+            ks[22] = _mm_aesimc_si128(ks[2]);
+            ks[23] = _mm_aesimc_si128(ks[1]);
+        }
+        return;
     }
+    /* C implementation */
 }
 
-void aes256_load_key_enc_only(const aes256_key_t* key, aes256_sched_enc_t* schedule) {
-    __m128i *s = (__m128i * ) (schedule->bytes);
-    __m128i a = _mm_loadu_si128((const __m128i*) (key->bytes));
-    __m128i b = _mm_loadu_si128(((const __m128i*) (key->bytes)) + 1);
-    _mm_storeu_si128(s++, a); // First 8 words = original key
-    _mm_storeu_si128(s, b);
+void aes256_load_key_internal(const aes256_key_t* key, aes256_sched_full_t* schedule, bool full) {
+    if (aes_support) {
+        __m128i *s = (__m128i * ) (schedule->bytes);
+        __m128i a = _mm_loadu_si128((const __m128i*) (key->bytes));
+        __m128i b = _mm_loadu_si128(((const __m128i*) (key->bytes)) + 1);
+        _mm_storeu_si128(s++, a); // First 8 words = original key
+        _mm_storeu_si128(s, b);
 
-    __m128i keygen = _mm_aeskeygenassist_si128(b, 0x01);
-    __m128i subword;
-    uint8_t next_case = 0;
-    goto first_four;
+        __m128i keygen = _mm_aeskeygenassist_si128(b, 0x01);
+        __m128i subword;
+        uint8_t next_case = 0;
+        goto first_four;
 
-    rcon_cases_loop:
-    // key expansion part || 8 words at a time (2 round keys)
-    // last four (5-8)
-    subword = _mm_aeskeygenassist_si128(a, 0x00);
-    subword = _mm_shuffle_epi32(subword, _MM_SHUFFLE(2, 2, 2, 2));
-    b = _mm_xor_si128(b, _mm_slli_si128(b, 4)); // xor's of: 0, 1 offsets
-    b = _mm_xor_si128(b, _mm_slli_si128(b, 8)); // xor's of: 0, 1, 2, 3 offsets
-    b = _mm_xor_si128(b, subword);
-    _mm_storeu_si128(++s, b);
-    first_four:
-    AES_KEY_EXP_ITER_FIRST4(a, keygen)
-    _mm_storeu_si128(++s, a);
-    
-    switch (next_case) {
-        #define case_block(THIS_CASE, NEXT_CASE, rcon)       \
-            case THIS_CASE: next_case = NEXT_CASE;           \
-                keygen = _mm_aeskeygenassist_si128(b, rcon); \
-                goto rcon_cases_loop;
-        case_block(0, 1, 0x02)
-        case_block(1, 2, 0x04)
-        case_block(2, 3, 0x08)
-        case_block(3, 4, 0x10)
-        case_block(4, 5, 0x20)
-        #undef case_block
-        case 5: next_case = 6; // last iteration only needs 4 words (1 round keys)
-            keygen = _mm_aeskeygenassist_si128(b, 0x40);
-            goto first_four;
-        case 6: return;
+        rcon_cases_loop:
+        // key expansion part || 8 words at a time (2 round keys)
+        // last four (5-8)
+        subword = _mm_aeskeygenassist_si128(a, 0x00);
+        subword = _mm_shuffle_epi32(subword, _MM_SHUFFLE(2, 2, 2, 2));
+        b = _mm_xor_si128(b, _mm_slli_si128(b, 4)); // xor's of: 0, 1 offsets
+        b = _mm_xor_si128(b, _mm_slli_si128(b, 8)); // xor's of: 0, 1, 2, 3 offsets
+        b = _mm_xor_si128(b, subword);
+        _mm_storeu_si128(++s, b);
+        first_four:
+        AES_KEY_EXP_ITER_FIRST4(a, keygen)
+        _mm_storeu_si128(++s, a);
+        
+        switch (next_case) {
+            #define case_block(THIS_CASE, NEXT_CASE, rcon)       \
+                case THIS_CASE: next_case = NEXT_CASE;           \
+                    keygen = _mm_aeskeygenassist_si128(b, rcon); \
+                    goto rcon_cases_loop;
+            case_block(0, 1, 0x02)
+            case_block(1, 2, 0x04)
+            case_block(2, 3, 0x08)
+            case_block(3, 4, 0x10)
+            case_block(4, 5, 0x20)
+            #undef case_block
+            case 5: next_case = 6; // last iteration only needs 4 words (1 round keys)
+                keygen = _mm_aeskeygenassist_si128(b, 0x40);
+                goto first_four;
+            case 6: return;
+        }
+
+        if (full) {
+            __m128i *ks = schedule->bytes;
+            ks[15] = _mm_aesimc_si128(ks[13]);
+            ks[16] = _mm_aesimc_si128(ks[12]);
+            ks[17] = _mm_aesimc_si128(ks[11]);
+            ks[18] = _mm_aesimc_si128(ks[10]);
+            ks[19] = _mm_aesimc_si128(ks[9]);
+            ks[20] = _mm_aesimc_si128(ks[8]);
+            ks[21] = _mm_aesimc_si128(ks[7]);
+            ks[22] = _mm_aesimc_si128(ks[6]);
+            ks[23] = _mm_aesimc_si128(ks[5]);
+            ks[24] = _mm_aesimc_si128(ks[4]);
+            ks[25] = _mm_aesimc_si128(ks[3]);
+            ks[26] = _mm_aesimc_si128(ks[2]);
+            ks[27] = _mm_aesimc_si128(ks[1]);
+        }
+        return;
     }
-}
-
-/* Generate decryption keys in reverse order.
- * k[N-1] shared by last encryption & first decryption rounds
- * k[0] shared by first encryption & last decryption round (is the original user key)
- */
-
- void aes128_load_key(const aes128_key_t* key, aes128_sched_full_t* schedule) {
-    __m128i *ks = schedule->bytes;
-    aes128_load_key_enc_only(key, ks);
-
-    ks[11] = _mm_aesimc_si128(ks[9]);
-    ks[12] = _mm_aesimc_si128(ks[8]);
-    ks[13] = _mm_aesimc_si128(ks[7]);
-    ks[14] = _mm_aesimc_si128(ks[6]);
-    ks[15] = _mm_aesimc_si128(ks[5]);
-    ks[16] = _mm_aesimc_si128(ks[4]);
-    ks[17] = _mm_aesimc_si128(ks[3]);
-    ks[18] = _mm_aesimc_si128(ks[2]);
-    ks[19] = _mm_aesimc_si128(ks[1]);
-}
-
-void aes192_load_key(const aes192_key_t* key, aes192_sched_full_t* schedule) {
-    __m128i *ks = schedule->bytes;
-    aes192_load_key_enc_only(key, ks);
-
-    ks[13] = _mm_aesimc_si128(ks[11]);
-    ks[14] = _mm_aesimc_si128(ks[10]);
-    ks[15] = _mm_aesimc_si128(ks[9]);
-    ks[16] = _mm_aesimc_si128(ks[8]);
-    ks[17] = _mm_aesimc_si128(ks[7]);
-    ks[18] = _mm_aesimc_si128(ks[6]);
-    ks[19] = _mm_aesimc_si128(ks[5]);
-    ks[20] = _mm_aesimc_si128(ks[4]);
-    ks[21] = _mm_aesimc_si128(ks[3]);
-    ks[22] = _mm_aesimc_si128(ks[2]);
-    ks[23] = _mm_aesimc_si128(ks[1]);
-}
-
-void aes256_load_key(const aes256_key_t* key, aes256_sched_full_t* schedule) {
-    __m128i *ks = schedule->bytes;
-    aes256_load_key_enc_only(key, ks);
-
-    ks[15] = _mm_aesimc_si128(ks[13]);
-    ks[16] = _mm_aesimc_si128(ks[12]);
-    ks[17] = _mm_aesimc_si128(ks[11]);
-    ks[18] = _mm_aesimc_si128(ks[10]);
-    ks[19] = _mm_aesimc_si128(ks[9]);
-    ks[20] = _mm_aesimc_si128(ks[8]);
-    ks[21] = _mm_aesimc_si128(ks[7]);
-    ks[22] = _mm_aesimc_si128(ks[6]);
-    ks[23] = _mm_aesimc_si128(ks[5]);
-    ks[24] = _mm_aesimc_si128(ks[4]);
-    ks[25] = _mm_aesimc_si128(ks[3]);
-    ks[26] = _mm_aesimc_si128(ks[2]);
-    ks[27] = _mm_aesimc_si128(ks[1]);
+    /* C implementation*/
 }
 
 /* --- Transform rounds internal --- */
@@ -386,29 +439,6 @@ void aes256_decrypt_blocks(const aes256_sched_full_t* schedule, const uint8_t (*
         AES256_DEC_BLOCK_AMD64(m, k)
         _mm_storeu_si128((__m128i *) plain++, m);
     }
-}
-
-
-/* --- Encrypt block transforms --- (in-place operation allowed) */
-void aes128_encrypt_block(const aes128_sched_enc_t* schedule, const uint8_t plain[16], uint8_t cipher[16]) {
-    aes128_encrypt_blocks(schedule, (const uint8_t (*)[16])plain, (uint8_t (*)[16])cipher, 1);
-}
-void aes192_encrypt_block(const aes192_sched_enc_t* schedule, const uint8_t plain[16], uint8_t cipher[16]) {
-    aes192_encrypt_blocks(schedule, (const uint8_t (*)[16])plain, (uint8_t (*)[16])cipher, 1);
-}
-void aes256_encrypt_block(const aes256_sched_enc_t* schedule, const uint8_t plain[16], uint8_t cipher[16]) {
-    aes256_encrypt_blocks(schedule, (const uint8_t (*)[16])plain, (uint8_t (*)[16])cipher, 1);
-}
-
-/* --- Decrypt block transforms --- (in-place operation allowed) */
-void aes128_decrypt_block(const aes128_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) {
-    aes128_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1);
-}
-void aes192_decrypt_block(const aes192_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) {
-    aes192_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1);
-}
-void aes256_decrypt_block(const aes256_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) {
-    aes256_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1);
 }
 
 #undef get_key

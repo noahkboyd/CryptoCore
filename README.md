@@ -28,9 +28,9 @@ GCM	(Galois/Counter Mode)   - 🟨 Combines CTR w/ authentication (AEAD)
 
 Notes:
 - Key size -> num rounds:
-  - 128 bit key -> 10 rounds
-  - 192 bit key -> 12 rounds
-  - 256 bit key -> 14 rounds
+  - 128 bit key -> 10 rounds || 11 round keys
+  - 192 bit key -> 12 rounds || 13 round keys
+  - 256 bit key -> 14 rounds || 15 round keys
 - General Instructions
   - AESENC          | Perform one round of an AES encryption flow
   - AESENCLAST      | Perform the last round of an AES encryption flow

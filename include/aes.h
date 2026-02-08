@@ -12,12 +12,27 @@
  */
 
 #include <stdint.h> /* for uint8_t */
+#include <stdbool.h>
+
+/* Aggressive inline macro for low-cost wrappers */
+#ifndef INLINE
+#if defined(_MSC_VER)
+    // Microsoft Visual C++
+    #define INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+    // GCC or Clang
+    #define INLINE inline __attribute__((always_inline))
+#else
+    // Fallback for other compilers
+    #define INLINE inline
+#endif
+#endif
 
 /* ----- PUBLIC API -----
  * Guide:
  *   1. Declare & initialize a key with the provided types.
- *   1. Use the key to generate the corresponding schedule (encryption-only or full)
- *   2. Use schedules with data to encrypt/decrypt.
+ *   2. Use the key to generate the corresponding schedule (encryption-only or full)
+ *   3. Use schedules with data to encrypt/decrypt.
  */
 
 /* --- Key types --- */
@@ -39,21 +54,16 @@ typedef struct { uint8_t bytes[208]; } aes192_sched_enc_t;  /* 13 round keys = 2
 typedef struct { uint8_t bytes[240]; } aes256_sched_enc_t;  /* 15 round keys = 240 bytes */
 
 /* --- Key schedule generators --- (writes to provided array) */
-void aes128_load_key(const aes128_key_t* key, aes128_sched_full_t* schedule);
-void aes192_load_key(const aes192_key_t* key, aes192_sched_full_t* schedule);
-void aes256_load_key(const aes256_key_t* key, aes256_sched_full_t* schedule);
-void aes128_load_key_enc_only(const aes128_key_t* key, aes128_sched_enc_t* schedule);
-void aes192_load_key_enc_only(const aes192_key_t* key, aes192_sched_enc_t* schedule);
-void aes256_load_key_enc_only(const aes256_key_t* key, aes256_sched_enc_t* schedule);
+void aes128_load_key_internal(const aes128_key_t* key, aes128_sched_full_t* schedule, bool full);
+void aes192_load_key_internal(const aes192_key_t* key, aes192_sched_full_t* schedule, bool full);
+void aes256_load_key_internal(const aes256_key_t* key, aes256_sched_full_t* schedule, bool full);
 
-/* --- Encrypt block transforms --- (in-place operation allowed) */
-void aes128_encrypt_block(const aes128_sched_enc_t*  schedule, const uint8_t plain[16], uint8_t cipher[16]);
-void aes192_encrypt_block(const aes192_sched_enc_t*  schedule, const uint8_t plain[16], uint8_t cipher[16]);
-void aes256_encrypt_block(const aes256_sched_enc_t*  schedule, const uint8_t plain[16], uint8_t cipher[16]);
-/* --- Decrypt block transforms --- (in-place operation allowed) */
-void aes128_decrypt_block(const aes128_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]);
-void aes192_decrypt_block(const aes192_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]);
-void aes256_decrypt_block(const aes256_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]);
+INLINE void aes128_load_key(const aes128_key_t* key, aes128_sched_full_t* schedule)         { aes128_load_key_internal(key, schedule, true ); }
+INLINE void aes192_load_key(const aes192_key_t* key, aes192_sched_full_t* schedule)         { aes192_load_key_internal(key, schedule, true ); }
+INLINE void aes256_load_key(const aes256_key_t* key, aes256_sched_full_t* schedule)         { aes256_load_key_internal(key, schedule, true ); }
+INLINE void aes128_load_key_enc_only(const aes128_key_t* key, aes128_sched_enc_t* schedule) { aes128_load_key_internal(key, schedule, false); }
+INLINE void aes192_load_key_enc_only(const aes192_key_t* key, aes192_sched_enc_t* schedule) { aes192_load_key_internal(key, schedule, false); }
+INLINE void aes256_load_key_enc_only(const aes256_key_t* key, aes256_sched_enc_t* schedule) { aes256_load_key_internal(key, schedule, false); }
 
 /* --- Encrypt blocks transforms --- (in-place operation allowed) */
 void aes128_encrypt_blocks(const aes128_sched_enc_t*  schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks);
@@ -63,6 +73,15 @@ void aes256_encrypt_blocks(const aes256_sched_enc_t*  schedule, const uint8_t (*
 void aes128_decrypt_blocks(const aes128_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks);
 void aes192_decrypt_blocks(const aes192_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks);
 void aes256_decrypt_blocks(const aes256_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks);
+
+/* --- Encrypt block transforms --- (in-place operation allowed) */
+INLINE void aes128_encrypt_block(const aes128_sched_enc_t*  schedule, const uint8_t plain[16], uint8_t cipher[16]) { aes128_encrypt_blocks(schedule, (const uint8_t (*)[16])plain,  (uint8_t (*)[16])cipher, 1); }
+INLINE void aes192_encrypt_block(const aes192_sched_enc_t*  schedule, const uint8_t plain[16], uint8_t cipher[16]) { aes192_encrypt_blocks(schedule, (const uint8_t (*)[16])plain,  (uint8_t (*)[16])cipher, 1); }
+INLINE void aes256_encrypt_block(const aes256_sched_enc_t*  schedule, const uint8_t plain[16], uint8_t cipher[16]) { aes256_encrypt_blocks(schedule, (const uint8_t (*)[16])plain,  (uint8_t (*)[16])cipher, 1); }
+/* --- Decrypt block transforms --- (in-place operation allowed) */
+INLINE void aes128_decrypt_block(const aes128_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) { aes128_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1); }
+INLINE void aes192_decrypt_block(const aes192_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) { aes192_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1); }
+INLINE void aes256_decrypt_block(const aes256_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) { aes256_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1); }
 
 /* Self test return cases
  *   0: no error
