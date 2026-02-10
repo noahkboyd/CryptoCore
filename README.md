@@ -1,5 +1,21 @@
-NOTICE: PROJECT IS IN PROGRESS, MISSING FEATURES AND IS BROKEN/UNTESTED.
-PLEASE REVIEW YOURSELF OR WAIT FOR ME TO FINISH PROJECT.
+***NOTICE: PROJECT IS IN PROGRESS, MISSING FEATURES AND IS BROKEN/UNTESTED.***
+***PLEASE REVIEW YOURSELF OR WAIT FOR ME TO FINISH PROJECT.***
+
+**The License means give me credit please.**
+
+All code is first optimized to have small binaries, especially cold parts of code.
+Hot parts are heavily optimized for speed.
+Thankfully binary size, performance, memory usage (heap+stack, not instructions), and efficiency go hand in hand.
+Optimizations considered/used:
+- Inlining functions carefully (use loops to reduce binary size)
+- Switch statments + custom goto loops
+- Fall through case blocks
+- Agnostic code - performs work for multiple workload variants (see pure c keygen)
+- Reducing branching in code
+  - branchless equations
+  - smarter control flow
+- Reducing memory operations
+  - greater use of registers
 
 Features & Usage:
 - AES for 128, 192 & 256 bits keys

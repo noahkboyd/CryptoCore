@@ -4,29 +4,15 @@
 /* AES for 128, 192 & 256 bits keys
  * Checks for AES ISA extension(amd64) & auto uses them
  * Features:
- *  - Key & schedule types (encryption-only & full (encryption & decryption) schedules)
+ *  - Key & schedule types (encryption-only & full)
  *  - Helper macros for typed key literals
  *  - Key schedule generators
- *  - Block transform functions (encrypt/decrypt)
- * Inspiration: https://stackoverflow.com/questions/50491807/aes-ni-intrinsics-with-192-and-256-bits-keys
+ *  - Block(s) transform functions (encrypt/decrypt)
  */
 
 #include <stdint.h> /* for uint8_t */
 #include <stdbool.h>
-
-/* Aggressive inline macro for low-cost wrappers */
-#ifndef INLINE
-#if defined(_MSC_VER)
-    // Microsoft Visual C++
-    #define INLINE __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
-    // GCC or Clang
-    #define INLINE inline __attribute__((always_inline))
-#else
-    // Fallback for other compilers
-    #define INLINE inline
-#endif
-#endif
+#include "general.h"
 
 /* ----- PUBLIC API -----
  * Guide:
