@@ -69,12 +69,4 @@ INLINE void aes128_decrypt_block(const aes128_sched_full_t* schedule, const uint
 INLINE void aes192_decrypt_block(const aes192_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) { aes192_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1); }
 INLINE void aes256_decrypt_block(const aes256_sched_full_t* schedule, const uint8_t cipher[16], uint8_t plain[16]) { aes256_decrypt_blocks(schedule, (const uint8_t (*)[16])cipher, (uint8_t (*)[16])plain, 1); }
 
-/* Self test return cases
- *   0: no error
- *   1: encryption failed
- *   2: decryption failed
- *   3: both failed
- */
-int aes128_self_test(void);
-
 #endif // __AES_H__
