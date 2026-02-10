@@ -92,30 +92,31 @@ typedef enum {
 
 void aes_load_key_c(const uint32_t* key, uint32_t* schedule, KeySizeCode keysize, bool full) {
     // Control flow things
-    uint8_t key_case = (keysize >> 1) - 2; // 128=0, 192=1, 256=2
-    uint8_t copy_key_case = 2 - key_case; // 256=0, 192=1, 128=2
-    uint8_t iterations = 7 - (keysize == KEY_256_CODE); // goto jumps inside, actual +1: 128=8, 192=8, 256=7
-    uint8_t enc_key_case = key_case + 1 - (((key_case != 2) - 1) & 3); // mod 3, order: 256=0, 128=1, 192=2
+    const uint32_t key_case = (keysize >> 1) - 2; // 128=0, 192=1, 256=2
+    const uint32_t copy_key_case = 2 - key_case;  // 256=0, 192=1, 128=2
+    const uint32_t enc_key_case = (copy_key_case & 2) + (keysize == KEY_192_CODE); // 192=0, 256=1, 128=2
+    uint32_t iterations = 9 - key_case - (keysize != KEY_128_CODE);
+    // goto jumps inside, actual +1: 128=10, 192=8, 256=7
 
     // For keygen iterations
     uint32_t w1, w2, w3, w4, w5, w6, w7, w8; // 4-6 words in each iteration
     uint32_t last;
-    uint32_t rcon = 0x01000000UL; // << 1 until 9th rcon
+    uint32_t rcon = 0x01000000U; // << 1 until 9th rcon
 
     // Copy original key
-    uint8_t offset = keysize - 1;
+    uint32_t offset = keysize - 1;
     key += offset;                     // repoint to last word in key
     uint32_t *dst = schedule + offset; //   point to last word of key in dst
     
     last = *key;
     switch (copy_key_case) {
-        case 0:
+        case 0: // aes 256
             w8 = *key--; *dst-- = w8;
             w7 = *key--; *dst-- = w7;
-        case 1:
+        case 1: // aes 192
             w6 = *key--; *dst-- = w6;
             w5 = *key--; *dst-- = w5;
-        case 2:
+        case 2: // aes 128
             w4 = *key--; *dst-- = w4;
             w3 = *key--; *dst-- = w3;
             w2 = *key--; *dst-- = w2;
@@ -128,36 +129,35 @@ void aes_load_key_c(const uint32_t* key, uint32_t* schedule, KeySizeCode keysize
     while (iterations--) {
         rcon <<= 1;
         switch (enc_key_case) {
-            case 0: // aes 256
+            case 0: // aes 192
+                w5 ^= SUB_WORD(w4); *dst++ = w5;
+                w6 ^= w5;           *dst++ = w6;
+                last = w6;
+                goto aes128_case_block;
+            case 1: // aes 256
                 w5 ^= SUB_WORD(w4); *dst++ = w5;
                 w6 ^= w5;           *dst++ = w6;
                 w7 ^= w6;           *dst++ = w7;
                 w8 ^= w7;           *dst++ = w8;
                 last = w8;
-            case 1: // aes 128
+            case 2: // aes 128
                 aes128_case_block:
                 w1 ^= SUBROT_WORD(last) ^ rcon; *dst++ = w1;
                 w2 ^= w1;                       *dst++ = w2;
                 w3 ^= w2;                       *dst++ = w3;
                 w4 ^= w3;                       *dst++ = w4;
                 last = w4;
-                break;
-            case 2: // aes 192
-                w5 ^= SUB_WORD(w4); *dst++ = w5;
-                w6 ^= w5;           *dst++ = w6;
-                last = w6;
-                goto aes128_case_block;
         }
     }
     // 2 more iterations for aes 128
     if (key_case == KEY_128_CODE) {
         switch (iterations) {
             case 0:
-                rcon = 0x1B000000UL;
+                rcon = 0x1B000000U;
                 iterations = 1;
                 goto aes128_case_block;
             case 1:
-                rcon = 0x36000000UL;
+                rcon = 0x36000000U;
                 iterations = 2;
                 goto aes128_case_block;
             case 2:
@@ -167,8 +167,8 @@ void aes_load_key_c(const uint32_t* key, uint32_t* schedule, KeySizeCode keysize
 
     // Produce decryption keys
     if (!full) return;
-    uint8_t num_enc_keys = 11 + (key_case << 1);
-    uint8_t num_dec_keys = num_enc_keys - 2;
+    uint32_t num_enc_keys = 11 + (key_case << 1);
+    uint32_t num_dec_keys = num_enc_keys - 2;
 
 }
 
@@ -185,7 +185,7 @@ void aes128_load_key_internal(const aes128_key_t* key, aes128_sched_full_t* sche
         _mm_storeu_si128(s, last); // First 4 words = original key
 
         __m128i keygen = _mm_aeskeygenassist_si128(last, 0x01);
-        uint8_t next_case = 0;
+        uint32_t next_case = 0;
 
         rcon_cases_loop:
         // key expansion part || 4 words at a time (1 round key)
@@ -237,7 +237,7 @@ void aes192_load_key_internal(const aes192_key_t* key, aes192_sched_full_t* sche
 
         __m128i keygen = _mm_aeskeygenassist_si128(last_56, 0x01);
         __m128i subword;
-        uint8_t next_case = 0;
+        uint32_t next_case = 0;
         goto first_four;
 
         rcon_cases_loop:
@@ -298,7 +298,7 @@ void aes256_load_key_internal(const aes256_key_t* key, aes256_sched_full_t* sche
 
         __m128i keygen = _mm_aeskeygenassist_si128(b, 0x01);
         __m128i subword;
-        uint8_t next_case = 0;
+        uint32_t next_case = 0;
         goto first_four;
 
         rcon_cases_loop:
