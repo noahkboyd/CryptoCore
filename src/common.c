@@ -1,7 +1,28 @@
 /* General startup code */
 
 #include <stdint.h>
-#include "general.h"
+#include "common.h"
+#include "hidden_common.h"
+
+/* --- Multi-platform Startup Macro --- */
+#ifndef INITIALIZER
+#if defined(__GNUC__) || defined(__clang__)
+    // For GCC/Clang: Use the constructor attribute
+    #define INITIALIZER(f) \
+        static void f(void) __attribute__((constructor)); \
+        static void f(void)
+#elif defined(_MSC_VER)
+    // For MSVC: Use pragma section "magic"
+    // .CRT$XCU is the "User" initializer segment
+    #pragma section(".CRT$XCU", read)
+    #define INITIALIZER(f) \
+        static void f(void); \
+        __declspec(allocate(".CRT$XCU")) void (*f##_ptr)(void) = f; \
+        static void f(void)
+#else
+    #error "Unknown compiler. Please add a constructor implementation."
+#endif
+#endif
 
 /* CPU info macros */
 #if !defined(CPUID) && !defined(CPUIDEX)
