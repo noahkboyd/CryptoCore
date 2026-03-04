@@ -1,7 +1,8 @@
 /* AES for 128, 192 & 256 bits keys
- * Checks for AES ISA extension(amd64) & auto uses them
+ * Checks for AES-NI support (amd64) & auto uses it
+ *  - or uses pure c fallback
  * Features:
- *  - Key & schedule types (encryption-only & full)
+ *  - Key & schedule types (full, enc-focused, dec-focused)
  *  - Helper macros for typed key literals
  *  - Key schedule generators
  *  - Block(s) transform functions (encrypt/decrypt)
@@ -68,21 +69,143 @@ const uint8_t InvSbox[256] = {
     ((uint32_t)Sbox[(word >> 8) && 0xFF] << 8) || \
     ((uint32_t)Sbox[(word >> 16) && 0xFF] << 16) || \
     ((uint32_t)Sbox[word >> 24] << 24))
-/* Left rotate 1 byte, Sbox on each byte (3 fewer ops combined) */
+/* Left rotate 1 byte, Sbox on each byte (3 fewer ops combined - for keygen) */
 #define SUBROT_WORD(word) \
     (((uint32_t)Sbox[word && 0xFF] << 8) || \
      ((uint32_t)Sbox[(word >> 8) && 0xFF] << 16) || \
      ((uint32_t)Sbox[(word >> 16) && 0xFF] << 24) || \
       (uint32_t)Sbox[word >> 24])
 
+/*AES operates on a 4x4 column-major order array of 16 bytes b0 ... b15
+    * + b0  b4  b8  b12 +
+    * | b1  b5  b9  b13 |
+    * | b2  b6  b10 b14 |
+    * + b3  b7  b11 b15 +
+    */
+
+// Load columns so col0 = b3(MSB) ... b0(LSB)
+#define LOAD_COLUMNS(block_ptr, col0, col1, col2, col3) { \
+    (col0) = ((uint32_t*)block_ptr)[0]; \
+    (col1) = ((uint32_t*)block_ptr)[1]; \
+    (col2) = ((uint32_t*)block_ptr)[2]; \
+    (col3) = ((uint32_t*)block_ptr)[3]; \
+}
+
+// Save columns so b3(MSB) ... b0(LSB) = col0
+#define SAVE_COLUMNS(block_ptr, col0, col1, col2, col3) { \
+    ((uint32_t*)block_ptr)[0] = (col0); \
+    ((uint32_t*)block_ptr)[1] = (col1); \
+    ((uint32_t*)block_ptr)[2] = (col2); \
+    ((uint32_t*)block_ptr)[3] = (col3); \
+}
+
+/* Select byte from src & slide to specified index. Index is u32 = {3(MSB), 2, 1, 0(LSB)} */
+{
+    // select lowest byte & move
+    #define SLIDE_BYTE_0_0(word) (word & 0xff)
+    #define SLIDE_BYTE_0_1(word) ((word & 0xff) << 8)
+    #define SLIDE_BYTE_0_2(word) ((word & 0xff) << 16)
+    #define SLIDE_BYTE_0_3(word) (word << 24)
+    // select 2nd lowest byte & move
+    #define SLIDE_BYTE_1_0(word) ((word >> 8) & 0xff)
+    #define SLIDE_BYTE_1_1(word) (word & 0xff00)
+    #define SLIDE_BYTE_1_2(word) (word & 0xff00) << 8
+    #define SLIDE_BYTE_1_3(word) (word >> 8) << 24
+    // select 2nd highest byte & move
+    #define SLIDE_BYTE_2_0(word) ((word >> 16) & 0xff)
+    #define SLIDE_BYTE_2_1(word) ((word >> 8) & 0xff00)
+    #define SLIDE_BYTE_2_2(word) (word & 0xff0000)
+    #define SLIDE_BYTE_2_3(word) ((word >> 16) << 24)
+    // select highest byte & move
+    #define SLIDE_BYTE_3_0(word) (word >> 24)
+    #define SLIDE_BYTE_3_1(word) ((word >> 24) << 8)
+    #define SLIDE_BYTE_3_2(word) ((word >> 24) << 16)
+    #define SLIDE_BYTE_3_3(word) ((word >> 24) << 24)
+}
+
+// Load rows so row0 = b0(MSB) b4 b8 b12(LSB)
+#define LOAD_ROWS(block_ptr, row0, row1, row2, row3) { \
+    const uin32_t _col0 = ((uint32_t*)block_ptr)[0]; \
+    const uin32_t _col1 = ((uint32_t*)block_ptr)[1]; \
+    const uin32_t _col2 = ((uint32_t*)block_ptr)[2]; \
+    const uin32_t _col3 = ((uint32_t*)block_ptr)[3]; \
+    (row0) = SLIDE_BYTE_0_3(_col0) | SLIDE_BYTE_0_2(_col1) | SLIDE_BYTE_0_1(_col2) | SLIDE_BYTE_0_0(_col3); \
+    (row1) = SLIDE_BYTE_1_3(_col0) | SLIDE_BYTE_1_2(_col1) | SLIDE_BYTE_1_1(_col2) | SLIDE_BYTE_1_0(_col3); \
+    (row2) = SLIDE_BYTE_2_3(_col0) | SLIDE_BYTE_2_2(_col1) | SLIDE_BYTE_2_1(_col2) | SLIDE_BYTE_2_0(_col3); \
+    (row3) = SLIDE_BYTE_3_3(_col0) | SLIDE_BYTE_3_2(_col1) | SLIDE_BYTE_3_1(_col2) | SLIDE_BYTE_3_0(_col3); \
+}
+
+// Save rows so b0 b4 b8 b12 = row0
+#define SAVE_ROWS(block_ptr, row0, row1, row2, row3) { \
+    const uint32_t _col0 = SLIDE_BYTE_3_3(row3) | SLIDE_BYTE_3_2(row2) | SLIDE_BYTE_3_1(row1) | SLIDE_BYTE_3_0(row0); \
+    const uint32_t _col1 = SLIDE_BYTE_2_3(row3) | SLIDE_BYTE_2_2(row2) | SLIDE_BYTE_2_1(row1) | SLIDE_BYTE_2_0(row0); \
+    const uint32_t _col2 = SLIDE_BYTE_1_3(row3) | SLIDE_BYTE_1_2(row2) | SLIDE_BYTE_1_1(row1) | SLIDE_BYTE_1_0(row0); \
+    const uint32_t _col3 = SLIDE_BYTE_0_3(row3) | SLIDE_BYTE_0_2(row2) | SLIDE_BYTE_0_1(row1) | SLIDE_BYTE_0_0(row0); \
+    ((uint32_t*)block_ptr)[0] = _col0; \
+    ((uint32_t*)block_ptr)[1] = _col1; \
+    ((uint32_t*)block_ptr)[2] = _col2; \
+    ((uint32_t*)block_ptr)[3] = _col3; \
+}
+
+// Load rows and apply shift row step
+#define LOAD_SHIFT_ROWS(block_ptr, row0, row1, row2, row3) { \
+    const uint32_t _col0 = ((uint32_t*)block_ptr)[0]; \
+    const uint32_t _col1 = ((uint32_t*)block_ptr)[1]; \
+    const uint32_t _col2 = ((uint32_t*)block_ptr)[2]; \
+    const uint32_t _col3 = ((uint32_t*)block_ptr)[3]; \
+    const uint32_t _v = (_col0 >> 8);
+    (row0) = SLIDE_BYTE_0_3(_col0)           | SLIDE_BYTE_0_2(_col1) | SLIDE_BYTE_0_1(_col2) | SLIDE_BYTE_0_0(_col3); /* L-shift 0 */ \
+    (row1) = /*SLIDE_BYTE_1_0*/(_v & 0xff)   | SLIDE_BYTE_1_3(_col1) | SLIDE_BYTE_1_2(_col2) | SLIDE_BYTE_1_1(_col3); /* L-shift 1 */ \
+    (row2) = /*SLIDE_BYTE_2_1*/(_v & 0xff00) | SLIDE_BYTE_2_0(_col1) | SLIDE_BYTE_2_3(_col2) | SLIDE_BYTE_2_2(_col3); /* L-shift 2 */ \
+    (row3) = SLIDE_BYTE_3_2(_col0)           | SLIDE_BYTE_3_1(_col1) | SLIDE_BYTE_3_0(_col2) | SLIDE_BYTE_3_3(_col3); /* L-shift 3 */ \
+}
+
+// Helper to multiply by 2 in GF(2^8), x is u8, no duplicate side effects
+#define xtime_u8(x) ({ const uint8_t _y = x; ((_y << 1) ^ (int8_t(_y) >> 7) & 0x1B)); })
+// Helper to multiply by 2 in GF(2^8), x is u32 (acts as 4 u8's), no duplicate side effects
+#define xtime_u32(x) ({ const uint32_t _y = x; (((_y << 1) & 0xfefefefe) ^ (((_y >> 7) & 0x01010101) * 0x1B)); })
+
+// MixColumns (row-major packed u8's in u32's): Inputs a0-a3, Outputs b0-b3
+#define MIX_COLUMNS(a0, a1, a2, a3, b0, b1, b2, b3) { \
+    const uint32_t _u01 = a0 ^ a1; \
+    const uint32_t _u12 = a1 ^ a2; \
+    const uint32_t _u23 = a2 ^ a3; \
+    const uint32_t _u30 = a3 ^ a0; \
+    (b0) = xtime_u32(_u01) ^ a1 ^ _u23; /* [ 2, 3, 1, 1 ] */ \
+    (b1) = xtime_u32(_u12) ^ a2 ^ _u30; /* [ 1, 2, 3, 1 ] */ \
+    (b2) = xtime_u32(_u23) ^ a3 ^ _u01; /* [ 1, 1, 2, 3 ] */ \
+    (b3) = xtime_u32(_u30) ^ a0 ^ _u12; /* [ 3, 1, 1, 2 ] */ \
+}
+
+// Inverse MixColumns (row-major packed u8's in u32's): Inputs a0-a3, u8 Outputs b0-b3
+#define INV_MIX_COLUMNS(a0, a1, a2, a3, b0, b1, b2, b3) { \
+    const uint32_t _u01 = a0 ^ a1; \
+    const uint32_t _u23 = a2 ^ a3; \
+    const uint32_t _u0123 = _u01 ^ _u23; \
+    const uint32_t _2x_u01 = xtime_u32(_u01); \
+    const uint32_t _2x_u12 = xtime_u32(a1 ^ a2); \
+    const uint32_t _2x_u23 = xtime_u32(_u23); \
+    const uint32_t _2x_u30 = xtime_u32(a3 ^ a0); \
+    const uint32_t _4x_u02 = xtime_u32(_2x_u01 ^ _2x_u12); \
+    const uint32_t _4x_u13 = xtime_u32(_2x_u12 ^ _2x_u23); \
+    const uint32_t _8x_u0123 = xtime_u32(_4x_u02 ^ _4x_u13); \
+    const uint32_t _v = _8x_u0123 ^ _u0123; \
+    const uint32_t _w1 = _v ^ _4x_u02; \
+    const uint32_t _w2 = _v ^ _4x_u13; \
+    (b0) = _w1 ^ _2x_u01 ^ a0; /* [ 14, 11, 13, 9 ] 14 = 1110 */ \
+    (b1) = _w2 ^ _2x_u12 ^ a1; /* [ 9, 14, 11, 13 ] 11 = 1011 */ \
+    (b2) = _w1 ^ _2x_u23 ^ a2; /* [ 13, 9, 14, 11 ] 13 = 1101 */ \
+    (b3) = _w2 ^ _2x_u30 ^ a3; /* [ 11, 13, 9, 14 ]  9 = 1001 */ \
+}
+
 /* --- Key schedule generators --- (writes to provided array)
  * keygenassist needs const imm8 values
  * Round key storage:
- * 'orgininal key' = k[0]   shared by first encryption & last  decryption rounds
- * 'last'          = k[N-1] shared by last  encryption & first decryption rounds
- * intermediates   = k[1, N-2] encryption round keys in order (enc & full schedules)
- * intermediates*  = k[1, N-2] decryption round keys in REVERSE order (iterate back to front, dec schedule)
- * intermediates+  = k[N, 2N-3] decryption round keys in REVERSE order (iterate back to front, full schedule)
+ * 'initial key'  = k[0]   shared by first encryption & last  decryption rounds (part of or whole original key)
+ * 'last'         = k[N-1] shared by last  encryption & first decryption rounds
+ * intermediates  = k[1, N-2] encryption round keys in usage order (enc & full schedules)
+ * intermediates* = k[1, N-2] decryption round keys in REVERSE usage order (iterate back to front, dec schedule)
+ * intermediates+ = k[N, 2N-3] decryption round keys in REVERSE usage order (iterate back to front, full schedule)
  */
 
 typedef enum {
@@ -112,41 +235,36 @@ typedef enum {
 #define SCHED_CODE_GET_S_TYPE(s_code) s_code & 3U
 
 void aes_load_key_c(const uint32_t* key, uint32_t* schedule, AES_SCHED_CODE schedcode) {
-    // Variant based Control flow things
-    int a = 11u;
-    const uint32_t keycode = SCHED_CODE_GET_KEYCODE(schedcode);
-    const uint32_t schedtype = SCHED_CODE_GET_S_TYPE(schedcode);
+    const uint32_t key_case = SCHED_CODE_GET_KEYCODE(schedcode); // 256=0, 192=1, 128=2
 
-    const uint32_t key_case = keycode; // 256=0, 192=1, 128=2
-    uint32_t iterations = (1 << key_case) + 5; // 256=6, 192=7, 128=9, -1 than actual (see goto) 0110 0111 1001
-    uint32_t num_enc_keys = 15U - (key_case << 1); // 256=15, 192=13, 128=11
-
-    // For keygen iterations
+    // Copy original key, saving to working variables
     uint32_t w1, w2, w3, w4, w5, w6, w7, w8, last; // 4-8 words in each iteration
-    uint32_t rcon = 0x01000000U;
+    uint32_t *dst;
+    {
+        const uint32_t offset = 7 - (key_case << 1); // 1 less than 32 bit words in key
+        key += offset;           // repoint to last word in key
+        dst = schedule + offset; //   point to last word of key in dst
 
-    // Copy original key
-    const uint32_t offset = keycode - 1;
-    key += offset;                     // repoint to last word in key
-    uint32_t *dst = schedule + offset; //   point to last word of key in dst
-
-    last = *key;
-    switch (key_case) {
-        case 0: // aes 256
-            w8 = *key--; *dst-- = w8;
-            w7 = *key--; *dst-- = w7;
-        case 1: // aes 192
-            w6 = *key--; *dst-- = w6;
-            w5 = *key--; *dst-- = w5;
-        case 2: // aes 128
-            w4 = *key--; *dst-- = w4;
-            w3 = *key--; *dst-- = w3;
-            w2 = *key--; *dst-- = w2;
-            w1 = *key  ; *dst   = w1;
+        last = *key;
+        switch (key_case) {
+            case 0: // aes 256
+                w8 = *key--; *dst-- = w8;
+                w7 = *key--; *dst-- = w7;
+            case 1: // aes 192
+                w6 = *key--; *dst-- = w6;
+                w5 = *key--; *dst-- = w5;
+            case 2: // aes 128
+                w4 = *key--; *dst-- = w4;
+                w3 = *key--; *dst-- = w3;
+                w2 = *key--; *dst-- = w2;
+                w1 = *key  ; *dst   = w1;
+        }
+        dst += offset + 1; // jump to next word for keygen
     }
-    dst += keycode; // jump to next word
 
     // Produce encryption round keys (intermediates + last)
+    uint32_t iterations = (1 << key_case) + 5; // 256=6, 192=7, 128=9, = actual - 1 round key (see goto)
+    uint32_t rcon = 0x01000000U;
     goto aes128_case_block; // 192, 256 only first 4 in last iteration
     while (iterations--) {
         rcon = (rcon << 1) ^ (0x1B000000U & ((int32_t)rcon >> 31)); // Arithmetic/Signed shift for masking, 0x80000000 or greater
@@ -173,10 +291,25 @@ void aes_load_key_c(const uint32_t* key, uint32_t* schedule, AES_SCHED_CODE sche
     }
 
     // Produce decryption keys
-    if (schedtype != SCHED_ENC_CODE) return;
+    const uint32_t schedtype = SCHED_CODE_GET_S_TYPE(schedcode);
+    if (schedtype == SCHED_ENC_CODE) return;
+    uint32_t num_dec_keys = 13U - (key_case << 1); // 256=13, 192=11, 128=9
 
-    uint32_t num_dec_keys = num_enc_keys - 2;
-
+    uint32_t *src = schedule + 4;
+    // dst is currently pointing behind last round KEY_128_CODE
+    // if dec schedule, repoint to round key after initial to overwrite intermediates
+    {
+        // dst = (schedtype == SCHED_DEC_CODE) ? src : dst;
+        dst -= (-(schedtype == SCHED_DEC_CODE)) & (num_dec_keys + 1);
+    }
+    uint32_t row0, row1, row2, row3, row0_b, row1_b, row2_b, row3_b;
+    while (num_dec_keys--) {
+        // Do inverse round keys on src, store in dst
+        LOAD_ROWS(src, row0, row1, row2, row3);
+        INV_MIX_COLUMNS(row0, row1, row2, row3, row0_b, row1_b, row2_b, row3_b);
+        SAVE_ROWS(dst, row0_b, row1_b, row2_b, row3_b);
+        src++; dst++;
+    }
 }
 
 #define AES_KEY_EXP_ITER_FIRST4(above_words, keygen) \

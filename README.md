@@ -3,9 +3,9 @@
 
 **The License means give me credit please.**
 
-All code is first optimized to have small binaries, especially cold parts of code.
-Hot parts are heavily optimized for speed.
-Thankfully binary size, performance, memory usage (heap+stack, not instructions), and efficiency go hand in hand.
+Limitations: only supports amd64, assumes little-endian machine 
+
+Cold parts of code are optimized for binary size and similar workflows are combined to reduce binary size. Hot parts of code are optimized for speed.
 Optimizations considered/used:
 - Inlining functions carefully (use loops to reduce binary size)
 - Switch statments + custom goto loops
