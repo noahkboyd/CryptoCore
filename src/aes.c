@@ -101,10 +101,10 @@ const uint8_t InvSbox[256] = {
 
 // Load rows so row0 = b0(MSB) b4 b8 b12(LSB)
 #define LOAD_ROWS(block_ptr, row0, row1, row2, row3) { \
-    const uin32_t _col0 = ((uint32_t*)block_ptr)[0]; \
-    const uin32_t _col1 = ((uint32_t*)block_ptr)[1]; \
-    const uin32_t _col2 = ((uint32_t*)block_ptr)[2]; \
-    const uin32_t _col3 = ((uint32_t*)block_ptr)[3]; \
+    const uint32_t _col0 = ((uint32_t*)block_ptr)[0]; \
+    const uint32_t _col1 = ((uint32_t*)block_ptr)[1]; \
+    const uint32_t _col2 = ((uint32_t*)block_ptr)[2]; \
+    const uint32_t _col3 = ((uint32_t*)block_ptr)[3]; \
     (row0) = SLIDE_BYTE_0_3(_col0) | SLIDE_BYTE_0_2(_col1) | SLIDE_BYTE_0_1(_col2) | SLIDE_BYTE_0_0(_col3); \
     (row1) = SLIDE_BYTE_1_3(_col0) | SLIDE_BYTE_1_2(_col1) | SLIDE_BYTE_1_1(_col2) | SLIDE_BYTE_1_0(_col3); \
     (row2) = SLIDE_BYTE_2_3(_col0) | SLIDE_BYTE_2_2(_col1) | SLIDE_BYTE_2_1(_col2) | SLIDE_BYTE_2_0(_col3); \
@@ -129,7 +129,7 @@ const uint8_t InvSbox[256] = {
     const uint32_t _col1 = ((uint32_t*)block_ptr)[1]; \
     const uint32_t _col2 = ((uint32_t*)block_ptr)[2]; \
     const uint32_t _col3 = ((uint32_t*)block_ptr)[3]; \
-    const uint32_t _v = (_col0 >> 8);
+    const uint32_t _v = (_col0 >> 8);                 \
     (row0) = SLIDE_BYTE_0_3(_col0)           | SLIDE_BYTE_0_2(_col1) | SLIDE_BYTE_0_1(_col2) | SLIDE_BYTE_0_0(_col3); /* L-shift 0 */ \
     (row1) = /*SLIDE_BYTE_1_0*/(_v & 0xff)   | SLIDE_BYTE_1_3(_col1) | SLIDE_BYTE_1_2(_col2) | SLIDE_BYTE_1_1(_col3); /* L-shift 1 */ \
     (row2) = /*SLIDE_BYTE_2_1*/(_v & 0xff00) | SLIDE_BYTE_2_0(_col1) | SLIDE_BYTE_2_3(_col2) | SLIDE_BYTE_2_2(_col3); /* L-shift 2 */ \
@@ -154,20 +154,20 @@ const uint8_t InvSbox[256] = {
 }
 
 // Inverse MixColumns (row-major packed u8's in u32's): Inputs a0-a3, u8 Outputs b0-b3
-#define INV_MIX_COLUMNS(a0, a1, a2, a3, b0, b1, b2, b3) { \
-    const uint32_t _u01 = a0 ^ a1; \
-    const uint32_t _u23 = a2 ^ a3; \
-    const uint32_t _u0123 = _u01 ^ _u23; \
-    const uint32_t _2x_u01 = xtime_u32(_u01); \
-    const uint32_t _2x_u12 = xtime_u32(a1 ^ a2); \
-    const uint32_t _2x_u23 = xtime_u32(_u23); \
-    const uint32_t _2x_u30 = xtime_u32(a3 ^ a0); \
-    const uint32_t _4x_u02 = xtime_u32(_2x_u01 ^ _2x_u12); \
-    const uint32_t _4x_u13 = xtime_u32(_2x_u12 ^ _2x_u23); \
-    const uint32_t _8x_u0123 = xtime_u32(_4x_u02 ^ _4x_u13); \
-    const uint32_t _v = _8x_u0123 ^ _u0123; \
-    const uint32_t _w1 = _v ^ _4x_u02; \
-    const uint32_t _w2 = _v ^ _4x_u13; \
+#define INV_MIX_COLUMNS(a0, a1, a2, a3, b0, b1, b2, b3) {        \
+    const uint32_t _u01 = a0 ^ a1;                               \
+    const uint32_t _u23 = a2 ^ a3;                               \
+    const uint32_t _u0123 = _u01 ^ _u23;                         \
+    const uint32_t _2x_u01 = xtime_u32(_u01);                    \
+    const uint32_t _2x_u12 = xtime_u32(a1 ^ a2);                 \
+    const uint32_t _2x_u23 = xtime_u32(_u23);                    \
+    const uint32_t _2x_u30 = xtime_u32(a3 ^ a0);                 \
+    const uint32_t _4x_u02 = xtime_u32(_2x_u01 ^ _2x_u12);       \
+    const uint32_t _4x_u13 = xtime_u32(_2x_u12 ^ _2x_u23);       \
+    const uint32_t _8x_u0123 = xtime_u32(_4x_u02 ^ _4x_u13);     \
+    const uint32_t _v = _8x_u0123 ^ _u0123;                      \
+    const uint32_t _w1 = _v ^ _4x_u02;                           \
+    const uint32_t _w2 = _v ^ _4x_u13;                           \
     (b0) = _w1 ^ _2x_u01 ^ a0; /* [ 14, 11, 13, 9 ] 14 = 1110 */ \
     (b1) = _w2 ^ _2x_u12 ^ a1; /* [ 9, 14, 11, 13 ] 11 = 1011 */ \
     (b2) = _w1 ^ _2x_u23 ^ a2; /* [ 13, 9, 14, 11 ] 13 = 1101 */ \
@@ -278,9 +278,9 @@ void aes_load_key_c(const uint32_t* key, uint32_t* schedule, AES_SCHED_CODE sche
         // dst = (schedtype == SCHED_DEC_CODE) ? src : dst;
         dst -= (-(schedtype == SCHED_DEC_CODE)) & (num_dec_keys + 1);
     }
-    uint32_t row0, row1, row2, row3, row0_b, row1_b, row2_b, row3_b;
+
     while (num_dec_keys--) {
-        // Do inverse round keys on src, store in dst
+        uint32_t row0, row1, row2, row3, row0_b, row1_b, row2_b, row3_b;
         LOAD_ROWS(src, row0, row1, row2, row3);
         INV_MIX_COLUMNS(row0, row1, row2, row3, row0_b, row1_b, row2_b, row3_b);
         SAVE_ROWS(dst, row0_b, row1_b, row2_b, row3_b);
@@ -295,7 +295,7 @@ void aes_load_key_c(const uint32_t* key, uint32_t* schedule, AES_SCHED_CODE sche
     above_words = _mm_xor_si128(above_words, keygen);
 
 void aes128_load_key_internal(const aes128_key_t* key, aes128_sched_full_t* schedule, bool full) {
-    if (hardware.aes) {
+    if (_hardware.aes) {
         __m128i *s = (__m128i *) (schedule->bytes);
         __m128i last = _mm_loadu_si128((const __m128i*) (key->bytes));
         _mm_storeu_si128(s, last); // First 4 words = original key
@@ -344,7 +344,7 @@ void aes128_load_key_internal(const aes128_key_t* key, aes128_sched_full_t* sche
 }
 
 void aes192_load_key_internal(const aes192_key_t* key, aes192_sched_full_t* schedule, bool full) {
-    if (hardware.aes) {
+    if (_hardware.aes) {
         uint32_t *s = (uint32_t*) (schedule->bytes);
         __m128i last_f4 = _mm_loadu_si128((const __m128i*) (key->bytes));
         __m128i last_56 = _mm_loadl_epi64(((const __m128i*) (key->bytes)) + 1);
@@ -405,7 +405,7 @@ void aes192_load_key_internal(const aes192_key_t* key, aes192_sched_full_t* sche
 }
 
 void aes256_load_key_internal(const aes256_key_t* key, aes256_sched_full_t* schedule, bool full) {
-    if (hardware.aes) {
+    if (_hardware.aes) {
         __m128i *s = (__m128i * ) (schedule->bytes);
         __m128i a = _mm_loadu_si128((const __m128i*) (key->bytes));
         __m128i b = _mm_loadu_si128(((const __m128i*) (key->bytes)) + 1);
@@ -560,7 +560,7 @@ void aes256_load_key_internal(const aes256_key_t* key, aes256_sched_full_t* sche
 /* --- Encrypt blocks transforms --- (in-place operation allowed) */
 void aes128_encrypt_blocks(const aes128_sched_enc_t* schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks) {
     const uint8_t* s = schedule->bytes;
-    if (hardware.aes) {
+    if (_hardware.aes) {
         get_keys_0_10(k, s)
 
         const uint8_t (*stop)[16] = plain + num_blocks;
@@ -575,7 +575,7 @@ void aes128_encrypt_blocks(const aes128_sched_enc_t* schedule, const uint8_t (*p
 }
 void aes192_encrypt_blocks(const aes192_sched_enc_t* schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks) {
     const uint8_t* s = schedule->bytes;
-    if (hardware.aes) {
+    if (_hardware.aes) {
         get_keys_0_10(k, s)
         get_key(k, 11, s);
         get_key(k, 12, s);
@@ -592,7 +592,7 @@ void aes192_encrypt_blocks(const aes192_sched_enc_t* schedule, const uint8_t (*p
 }
 void aes256_encrypt_blocks(const aes256_sched_enc_t* schedule, const uint8_t (*plain)[16], uint8_t (*cipher)[16], size_t num_blocks) {
     const uint8_t* s = schedule->bytes;
-    if (hardware.aes) {
+    if (_hardware.aes) {
         get_keys_0_10(k, s)
         get_key(k, 11, s);
         get_key(k, 12, s);
@@ -612,7 +612,7 @@ void aes256_encrypt_blocks(const aes256_sched_enc_t* schedule, const uint8_t (*p
 /* --- Decrypt blocks transforms --- (in-place operation allowed) */
 void aes128_decrypt_blocks(const aes128_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks) {
     const uint8_t* s = schedule->bytes;
-    if (hardware.aes) {
+    if (_hardware.aes) {
         get_11_keys(k, s, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
 
         const uint8_t (*stop)[16] = plain + num_blocks;
@@ -627,7 +627,7 @@ void aes128_decrypt_blocks(const aes128_sched_full_t* schedule, const uint8_t (*
 }
 void aes192_decrypt_blocks(const aes192_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks) {
     const uint8_t* s = schedule->bytes;
-    if (hardware.aes) {
+    if (_hardware.aes) {
         get_11_keys(k, s, 0, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21)
         get_key(k, 22, s);
         get_key(k, 23, s);
@@ -644,7 +644,7 @@ void aes192_decrypt_blocks(const aes192_sched_full_t* schedule, const uint8_t (*
 }
 void aes256_decrypt_blocks(const aes256_sched_full_t* schedule, const uint8_t (*cipher)[16], uint8_t (*plain)[16], size_t num_blocks) {
     const uint8_t* s = schedule->bytes;
-    if (hardware.aes) {
+    if (_hardware.aes) {
         get_11_keys(k, s, 0, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
         get_key(k, 24, s);
         get_key(k, 25, s);

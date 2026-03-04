@@ -62,5 +62,5 @@ INITIALIZER(startup) {
     _Bool aes  = (ecx >> 25) & 1;
     _Bool sse2 = (edx >> 26) & 1;
 
-    hardware.aes = aes && sse2;
+    _hardware.aes = aes && sse2;
 }

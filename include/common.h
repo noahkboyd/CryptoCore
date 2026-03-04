@@ -3,6 +3,11 @@
 
 /* Contains general macros, shared values and some startup code */
 
+/* Hardware support - exposed to toggle pure c and intrinsics workflows. */
+struct {
+    _Bool aes; /* AES hardware acceleration (SSE2, AES) */
+} _hardware;
+
 /* Aggressive inline macro for low-cost wrappers */
 #ifndef INLINE
 #if defined(_MSC_VER)
