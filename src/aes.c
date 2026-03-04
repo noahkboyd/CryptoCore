@@ -77,11 +77,11 @@ const uint8_t InvSbox[256] = {
       (uint32_t)Sbox[word >> 24])
 
 /*AES operates on a 4x4 column-major order array of 16 bytes b0 ... b15
-    * + b0  b4  b8  b12 +
-    * | b1  b5  b9  b13 |
-    * | b2  b6  b10 b14 |
-    * + b3  b7  b11 b15 +
-    */
+* + b0  b4  b8  b12 +
+* | b1  b5  b9  b13 |
+* | b2  b6  b10 b14 |
+* + b3  b7  b11 b15 +
+*/
 
 // Load columns so col0 = b3(MSB) ... b0(LSB)
 #define LOAD_COLUMNS(block_ptr, col0, col1, col2, col3) { \
@@ -97,30 +97,6 @@ const uint8_t InvSbox[256] = {
     ((uint32_t*)block_ptr)[1] = (col1); \
     ((uint32_t*)block_ptr)[2] = (col2); \
     ((uint32_t*)block_ptr)[3] = (col3); \
-}
-
-/* Select byte from src & slide to specified index. Index is u32 = {3(MSB), 2, 1, 0(LSB)} */
-{
-    // select lowest byte & move
-    #define SLIDE_BYTE_0_0(word) (word & 0xff)
-    #define SLIDE_BYTE_0_1(word) ((word & 0xff) << 8)
-    #define SLIDE_BYTE_0_2(word) ((word & 0xff) << 16)
-    #define SLIDE_BYTE_0_3(word) (word << 24)
-    // select 2nd lowest byte & move
-    #define SLIDE_BYTE_1_0(word) ((word >> 8) & 0xff)
-    #define SLIDE_BYTE_1_1(word) (word & 0xff00)
-    #define SLIDE_BYTE_1_2(word) (word & 0xff00) << 8
-    #define SLIDE_BYTE_1_3(word) (word >> 8) << 24
-    // select 2nd highest byte & move
-    #define SLIDE_BYTE_2_0(word) ((word >> 16) & 0xff)
-    #define SLIDE_BYTE_2_1(word) ((word >> 8) & 0xff00)
-    #define SLIDE_BYTE_2_2(word) (word & 0xff0000)
-    #define SLIDE_BYTE_2_3(word) ((word >> 16) << 24)
-    // select highest byte & move
-    #define SLIDE_BYTE_3_0(word) (word >> 24)
-    #define SLIDE_BYTE_3_1(word) ((word >> 24) << 8)
-    #define SLIDE_BYTE_3_2(word) ((word >> 24) << 16)
-    #define SLIDE_BYTE_3_3(word) ((word >> 24) << 24)
 }
 
 // Load rows so row0 = b0(MSB) b4 b8 b12(LSB)
